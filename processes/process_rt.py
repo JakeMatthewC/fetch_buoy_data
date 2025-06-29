@@ -1,6 +1,6 @@
 import pandas as pd
-import config as c
-import utils as u
+import config.config as c
+import processes.utils as u
 
 def process_rt(station_id, date):
     # look for local "realtime" files

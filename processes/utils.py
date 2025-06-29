@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 import psycopg2
-import query as q
-import config as c
+import data.query as q
+import config.config as c
 
 def insert_time_steps(cur,df_time_steps):
     for _, row in df_time_steps.iterrows():

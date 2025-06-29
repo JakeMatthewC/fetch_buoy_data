@@ -1,9 +1,9 @@
 import pandas as pd
-import config as c
+import config.config as c
 from datetime import datetime
 
 def process_api(station_id, date):
-    import utils as u
+    import processes.utils as u
     ## if no local file is used, read from api 
     # create the buoy filepath to request from
     txt_buoy_file = f"https://www.ndbc.noaa.gov/data/realtime2/{station_id}.txt"

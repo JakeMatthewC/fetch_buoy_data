@@ -1,8 +1,8 @@
 import pandas as pd
-import config as c
+import config.config as c
 
 def process_year(station_id,date):
-    import utils as u
+    import processes.utils as u
     # look for local annual bulk file for given year
     df_txt = pd.read_csv(f"{c.noaa_year_path}\\{date}_year_{station_id}.txt", sep='\s+', skiprows=[1], na_values=["MM",'999.0'])
     df_data_spec = pd.read_csv(f"{c.noaa_year_path}\\{date}_year_{station_id}.data_spec", sep='\s+', skiprows=[1], na_values=["MM",'999.0'])

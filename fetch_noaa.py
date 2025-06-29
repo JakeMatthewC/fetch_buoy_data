@@ -1,10 +1,10 @@
-import config as c
-import utils as u
+import config.config as c
+import processes.utils as u
 import pandas as pd
 import sys
-from process_rt import process_rt
-from process_year import process_year
-from process_api import process_api
+from processes.process_rt import process_rt
+from processes.process_year import process_year
+from processes.process_api import process_api
 
 # file name parameters
 file_station_id = [42055]
