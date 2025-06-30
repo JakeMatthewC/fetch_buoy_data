@@ -7,7 +7,7 @@ from processes.process_year import process_year
 from processes.process_api import process_api
 
 # file name parameters
-file_station_id = [42055]
+file_station_id = [41010]
 file_date = ["2024"]
 file_type = ["year"]
 
