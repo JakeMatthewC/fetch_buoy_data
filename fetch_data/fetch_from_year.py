@@ -1,8 +1,8 @@
 import pandas as pd
 import config.config as c
 
-def process_year(station_id,date):
-    from processes.fetch_save_year_files import download_noaa_year_txt
+def fetch_from_year(station_id,date):
+    from fetch_data.fetch_save_year_files import download_noaa_year_txt
     download_noaa_year_txt(station_id, date)
 
     import processes.utils as u

@@ -21,7 +21,7 @@ def get_buoy_id(station_id):
     return buoy_id
 
 def insert_ts_row(cur, buoy_id, row):
-    from utils import safe_val
+    from processes.utils import safe_val
     cur.execute("""
         INSERT INTO dirspec.time_steps (
             buoy_id, timestamp, WDIR, WSPD, GST, WVHT, DPD, APD, MWD, PRES,

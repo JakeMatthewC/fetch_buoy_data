@@ -1,21 +1,29 @@
 import numpy as np
 import pandas as pd
-import psycopg2
+
+# modules
 import data.query as q
 import config.config as c
 
-def insert_time_steps(cur,df_time_steps):
+def insert_time_steps(cur,df_time_steps,f_type):
     for _, row in df_time_steps.iterrows():
         buoy_id = q.get_buoy_id(row['station_id'])
         buoy_id = [int(buoy_id.loc[0,"id"])]
+        if f_type == 'year':
+            source = 'noaa-year'
+        elif f_type == 'api':
+            source = 'noaa-api'
+
         if buoy_id:
             cur.execute("""
                 INSERT INTO dirspec.time_steps (
                     buoy_id, timestamp, WDIR, WSPD, GST, WVHT, DPD, APD, MWD, PRES,
-                    ATMP, WTMP, DEWP, VIS, PTDY, TIDE, m0, hm0, m_1, Te, P
+                    ATMP, WTMP, DEWP, VIS, PTDY, TIDE, m0, hm0, m_1, Te, P, source,
+                    storm_name, storm_type, storm_heading_deg, storm_speed_kts, storm_distance_km,
+                    storm_section_9, storm_id, is_storm, modality
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (buoy_id, timestamp) DO NOTHING;
             """, (
                 buoy_id[0], row['datetime'],
@@ -23,7 +31,10 @@ def insert_time_steps(cur,df_time_steps):
                 safe_val(row.get('DPD')), safe_val(row.get('APD')), safe_val(row.get('MWD')), safe_val(row.get('PRES')),
                 safe_val(row.get('ATMP')), safe_val(row.get('WTMP')), safe_val(row.get('DEWP')), safe_val(row.get('VIS')),
                 safe_val(row.get('PTDY')), safe_val(row.get('TIDE')), safe_val(row.get('m0')), safe_val(row.get('hm0')),
-                safe_val(row.get('m_1')), safe_val(row.get('Te')), safe_val(row.get('P'))
+                safe_val(row.get('m_1')), safe_val(row.get('Te')), safe_val(row.get('P')), source, row.get('storm_name'),
+                row.get('storm_type'), safe_val(row.get('storm_heading_deg')), safe_val(row.get('storm_speed_kts')), 
+                safe_val(row.get('storm_distance_km')), row.get('storm_section_9'), row.get('storm_id'), row.get('is_storm'), 
+                row.get('modality')
             ))
 
 def get_unprocessed_timesteps(cur,station_id):
@@ -85,89 +96,3 @@ def df_txt_calcs(df_txt, df_data_spec):
     df_txt['station_id'] = df_txt['station_id'].astype(str)
     return df_txt
 
-def vec_calcs(station_id, spec_row, swdir_row, swdir2_row, swr1_row, swr2_row, datetime_obj):    
-    # prepare for vectorized calculation
-    alpha1 = pd.to_numeric(swdir_row, errors='coerce')
-    alpha1 = np.where(~np.isnan(alpha1), met_to_math_dir(alpha1), np.nan)
-    alpha1 = alpha1.astype(float)
-    alpha2 = pd.to_numeric(swdir2_row, errors='coerce')
-    alpha2 = np.where(~np.isnan(alpha2), met_to_math_dir(alpha2), np.nan)
-    alpha2 = alpha2.astype(float)
-
-    r1 = pd.to_numeric(swr1_row,errors='coerce')
-    r1 = np.array(r1)
-    r2 = pd.to_numeric(swr2_row, errors='coerce')
-    r2 = np.array(r2)
-
-    Ef = pd.to_numeric(spec_row, errors='coerce')
-    Ef = np.array(Ef)
-
-    alpha1_grid = alpha1[:,None]
-    alpha2_grid = alpha2[:, None]
-    E = Ef[:, None]
-
-    D = (1 / (2 * np.pi)) * (
-        (1 + 2 * r1[:, None] * np.cos(c.theta_grid - alpha1_grid))
-        + (2 * r2[:, None] * np.cos(2 * (c.theta_grid - alpha2_grid))
-        ))
-    
-    # remove negatives from D output
-    D = np.maximum(D, 0)
-    
-    row_sums = np.sum(D, axis=1, keepdims=True) * c.delta_theta_rad
-    # prevent division by 0
-    row_sums[row_sums == 0] = 1
-    # normalize
-    D_normalized = D / row_sums
-    #check = np.sum(D_normalized, axis=1, keepdims=True) * delta_theta_rad
-    #print(check)
-
-    S = D_normalized * E
-
-    # get the timestep id from the timesteps table
-    timestep_id = get_time_step_id(c.cur, str(station_id), datetime_obj)
-
-    # organize for exporting to postgres table
-    records_param = []
-    records_dir = []
-    for m, f in enumerate(c.freqs):
-        # these values are recorded to every row for this frequency bin
-        a_1 = float(alpha1[m]) if not np.isnan(alpha1[m]) else None
-        a_2 = float(alpha2[m]) if not np.isnan(alpha2[m]) else None
-        r_1 = float(r1[m]) if not np.isnan(r1[m]) else None
-        r_2 = float(r2[m]) if not np.isnan(r2[m]) else None
-        energy_density = float(E[m, 0])
-        records_param.append((int(timestep_id), float(f), a_1, a_2, r_1, r_2, float(energy_density)))
-
-    # write the spectral data to the spec table
-    spectra_parameters_insert_query = """
-        INSERT INTO dirspec.spectra_parameters (time_step_id, frequency, alpha1, alpha2, r1, r2, energy_density)
-        VALUES %s
-        ON CONFLICT (time_step_id, frequency) DO NOTHING
-    """
-    psycopg2.extras.execute_values(c.cur, spectra_parameters_insert_query, records_param, page_size=100)
-
-    for m, f in enumerate(c.freqs):
-        for n, theta in enumerate(c.directional_pnts_deg):
-            spreading = float(D_normalized[m, n])
-            records_dir.append((timestep_id, f, theta, spreading))
-
-    records_dir = [(int(timestep_id), float(f), int(theta), float(spreading)) for (timestep_id, f, theta, spreading) in records_dir]
-
-    direction_insert_query = """
-        INSERT INTO dirspec.spectra_directional (
-            time_step_id, frequency, direction, spreading
-        ) VALUES %s
-        ON CONFLICT (time_step_id, frequency, direction) DO NOTHING
-    """
-    psycopg2.extras.execute_values(c.cur, direction_insert_query, records_dir, page_size=500)
-
-    c.conn.commit()
-    # update flag
-    c.cur.execute("""
-        UPDATE dirspec.time_steps
-        SET spectra_ingested = TRUE
-        WHERE id = %s
-    """, (timestep_id,))
-    c.conn.commit()
-        

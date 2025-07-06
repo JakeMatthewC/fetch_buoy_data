@@ -2,7 +2,7 @@ import pandas as pd
 import config.config as c
 import processes.utils as u
 
-def process_rt(station_id, date):
+def fetch_from_rt(station_id, date):
     # look for local "realtime" files
     df_txt = pd.read_csv(f"{c.noaa_rt_path}\\{date}_rt_{station_id}.txt",index_col=0)
     df_data_spec = pd.read_csv(f"{c.noaa_rt_path}\\{date}_rt_{station_id}.data_spec",index_col=0)
