@@ -18,12 +18,11 @@ def insert_time_steps(cur,df_time_steps,f_type):
             cur.execute("""
                 INSERT INTO dirspec.time_steps (
                     buoy_id, timestamp, WDIR, WSPD, GST, WVHT, DPD, APD, MWD, PRES,
-                    ATMP, WTMP, DEWP, VIS, PTDY, TIDE, m0, hm0, m_1, Te, P, source,
-                    storm_name, storm_type, storm_heading_deg, storm_speed_kts, storm_distance_km,
-                    storm_section_9, storm_id, is_storm, modality
+                    ATMP, WTMP, DEWP, VIS, PTDY, TIDE, m0, hm0, m_1, Te, P, source
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s)
                 ON CONFLICT (buoy_id, timestamp) DO NOTHING;
             """, (
                 buoy_id[0], row['datetime'],
@@ -31,10 +30,7 @@ def insert_time_steps(cur,df_time_steps,f_type):
                 safe_val(row.get('DPD')), safe_val(row.get('APD')), safe_val(row.get('MWD')), safe_val(row.get('PRES')),
                 safe_val(row.get('ATMP')), safe_val(row.get('WTMP')), safe_val(row.get('DEWP')), safe_val(row.get('VIS')),
                 safe_val(row.get('PTDY')), safe_val(row.get('TIDE')), safe_val(row.get('m0')), safe_val(row.get('hm0')),
-                safe_val(row.get('m_1')), safe_val(row.get('Te')), safe_val(row.get('P')), source, row.get('storm_name'),
-                row.get('storm_type'), safe_val(row.get('storm_heading_deg')), safe_val(row.get('storm_speed_kts')), 
-                safe_val(row.get('storm_distance_km')), row.get('storm_section_9'), row.get('storm_id'), row.get('is_storm'), 
-                row.get('modality')
+                safe_val(row.get('m_1')), safe_val(row.get('Te')), safe_val(row.get('P')), source
             ))
 
 def get_unprocessed_timesteps(cur,station_id):

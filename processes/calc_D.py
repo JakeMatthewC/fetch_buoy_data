@@ -5,9 +5,9 @@ def calc_D(df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_ty
     import numpy as np
 
     # modules
-    import utils as u
-    import config as c
-    import processes as p
+    import processes.utils as u
+    import config.config as c
+    import processes.detect_modality as dm
 
     # loops through each timestep where spec_ingested = False
     for i,spec_row in df_data_spec.iterrows():
@@ -115,13 +115,13 @@ def calc_D(df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_ty
         psycopg2.extras.execute_values(c.cur, direction_insert_query, records_dir, page_size=500)
 
         # Now determine modality and record for each timestep
-        modality_res = p.detect_modality(S)
+        modality_res = dm.detect_modality_from_dmatrix(S)
 
         c.conn.commit()
         # update flag
         c.cur.execute("""
             UPDATE dirspec.time_steps
-            SET modality = %s,     
+            SET modality_boot = %s,     
                 spectra_ingested = TRUE
             WHERE id = %s
         """, (modality_res, timestep_id,))

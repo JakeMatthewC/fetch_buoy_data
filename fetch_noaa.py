@@ -3,7 +3,8 @@ import pandas as pd
 # modules
 import config.config as c
 import processes.utils as u
-import processes as p
+import processes.calc_D as calc_D
+import processes.storm_buoy_match as sbm
 from fetch_data.fetch_from_rt import fetch_from_rt
 from fetch_data.fetch_from_year import fetch_from_year
 from fetch_data.fetch_from_api import fetch_from_api
@@ -26,14 +27,13 @@ for station_id,f_date,f_type in zip(file_station_id,file_date,file_type):
     # perform calcs for bulk parameters at each timestep
     df_txt = u.df_txt_calcs(df_txt, df_data_spec)
 
-
-    # perform storm analysis at each timestep
-
-
     # move processed timesteps to database
     cur = c.conn.cursor()
     u.insert_time_steps(cur, df_txt, f_type)
     c.conn.commit()
+
+    # perform storm analysis at each timestep
+    df_txt = sbm.storm_buoy_match(cur, None, df_txt)
 
     # filter the timesteps to only unprocessed ones
     # check for spectrum ingested flag across timesteps
@@ -53,4 +53,4 @@ for station_id,f_date,f_type in zip(file_station_id,file_date,file_type):
     df_swdir2 = df_swdir2[df_swdir2['datetime'].isin(dt_index)].reset_index(drop=True)
 
     # process for calculating D and determining modality
-    p.calc_D(df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_type)
+    calc_D.calc_D(df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_type)
