@@ -40,6 +40,17 @@ def insert_ts_row(cur, buoy_id, row):
         safe_val(row.get('m_1')), safe_val(row.get('Te')), safe_val(row.get('P'))
     ))
 
+def insert_cdip_buoy(cur, meta_buoy):
+    cur.execute("""
+        INSERT INTO dirspec.buoys (
+            station_id, name, lat, lon, depth            
+        )
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (station_id) DO NOTHING;        
+    """, (
+        meta_buoy['station_id'], meta_buoy['name'], meta_buoy['lat'], meta_buoy['lon'], meta_buoy['depth']
+    ))
+
 def get_spec_ing_false(buoy_id):
     df = pd.read_sql(text("""
         SELECT timestamp

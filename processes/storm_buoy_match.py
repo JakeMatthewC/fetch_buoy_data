@@ -53,6 +53,9 @@ def storm_buoy_match(cur, storm_df, buoy_df, max_distance_km=400):
 
     # adding new buoy condition
     elif buoy_df is not None:
+        # create a dictionary for later when uploading timesteps with storm
+        storm_dict = {}
+
         # find the start and end timestamps for the buoy data being pulled in
         buoy_timestamps = buoy_df['datetime']
         start_datetime = min(buoy_timestamps)
@@ -89,7 +92,10 @@ def storm_buoy_match(cur, storm_df, buoy_df, max_distance_km=400):
                         buoy_df_timestep, storm_name = update_buoy_time_steps(buoy_row, storm_row, dist)
                         update_time_steps_table(cur, buoy_row, storm_name, time_step_id)
 
-        return buoy_df
+                        # add to dictionary for later
+                        storm_dict[time_step_id] = True
+
+        return buoy_df, storm_dict
 
 def find_buoys_with_timestamp(storm_timestamp):   
     df = pd.read_sql(text("""

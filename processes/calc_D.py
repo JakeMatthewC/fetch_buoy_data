@@ -1,4 +1,4 @@
-def calc_D(df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_type):
+def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_type, start_date, end_date, save_is_storm):
     import sys
     import pandas as pd
     import psycopg2
@@ -28,7 +28,7 @@ def calc_D(df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_ty
         # save the datetime object for reference later
         datetime_obj = spec_row['datetime']
         
-        if f_type == 'rt' or f_type == 'api':
+        if f_type == 'noaa-rt' or f_type == 'noaa-api':
             # drop the unneeded rows for calculations
             spec_row = spec_row.iloc[3:]
         else:
@@ -82,10 +82,10 @@ def calc_D(df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_ty
         # organize for exporting to postgres table
         records_param = []
         records_dir = []
-        for m, f in enumerate(c.freqs):
+        for m, f in enumerate(c.noaa_freqs):
             # these values are recorded to every row for this frequency bin
-            a_1 = float(alpha1[m]) if not np.isnan(alpha1[m]) else None
-            a_2 = float(alpha2[m]) if not np.isnan(alpha2[m]) else None
+            a_1 = float(u.math_to_met_dir(alpha1[m])) if not np.isnan(alpha1[m]) else None
+            a_2 = float(u.math_to_met_dir(alpha2[m])) if not np.isnan(alpha2[m]) else None
             r_1 = float(r1[m]) if not np.isnan(r1[m]) else None
             r_2 = float(r2[m]) if not np.isnan(r2[m]) else None
             energy_density = float(E[m, 0])
@@ -99,31 +99,46 @@ def calc_D(df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_ty
         """
         psycopg2.extras.execute_values(c.cur, spectra_parameters_insert_query, records_param, page_size=100)
 
-        for m, f in enumerate(c.freqs):
+        for m, f in enumerate(c.noaa_freqs):
             for n, theta in enumerate(c.directional_pnts_deg):
                 spreading = float(D_normalized[m, n])
                 records_dir.append((timestep_id, f, theta, spreading))
 
         records_dir = [(int(timestep_id), float(f), int(theta), float(spreading)) for (timestep_id, f, theta, spreading) in records_dir]
 
-        direction_insert_query = """
-            INSERT INTO dirspec.spectra_directional (
-                time_step_id, frequency, direction, spreading
-            ) VALUES %s
-            ON CONFLICT (time_step_id, frequency, direction) DO NOTHING
-        """
-        psycopg2.extras.execute_values(c.cur, direction_insert_query, records_dir, page_size=500)
-
         # Now determine modality and record for each timestep
         modality_res = dm.detect_modality_from_dmatrix(S)
 
-        c.conn.commit()
-        # update flag
-        c.cur.execute("""
-            UPDATE dirspec.time_steps
-            SET modality_boot = %s,     
-                spectra_ingested = TRUE
-            WHERE id = %s
-        """, (modality_res, timestep_id,))
-        c.conn.commit()
+        in_date_range = (start_date <= datetime_obj <= end_date)
+        is_storm_case = save_is_storm and timestep_id in storm_dict
+
+        if in_date_range or is_storm_case:
+            direction_insert_query = """
+                INSERT INTO dirspec.spectra_directional (
+                    time_step_id, frequency, direction, spreading
+                ) VALUES %s
+                ON CONFLICT (time_step_id, frequency, direction) DO NOTHING
+            """
+            psycopg2.extras.execute_values(c.cur, direction_insert_query, records_dir, page_size=500)
+
+            c.conn.commit()
+
+            # update flag
+            c.cur.execute("""
+                UPDATE dirspec.time_steps
+                SET modality_boot = %s,     
+                    spectra_ingested = TRUE
+                WHERE id = %s
+            """, (modality_res, timestep_id,))
+            c.conn.commit()
+
+        else:
+            # update flag
+            c.cur.execute("""
+                UPDATE dirspec.time_steps
+                SET modality_boot = %s,     
+                    spectra_ingested = FALSE
+                WHERE id = %s
+            """, (modality_res, timestep_id,))
+            c.conn.commit()
             

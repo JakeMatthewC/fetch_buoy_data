@@ -1,7 +1,7 @@
 import pandas as pd
 import config.config as c
 
-def fetch_from_year(station_id,date):
+def fetch_from_year(station_id, date):
     from fetch_data.fetch_save_year_files import download_noaa_year_txt
     download_noaa_year_txt(station_id, date)
 

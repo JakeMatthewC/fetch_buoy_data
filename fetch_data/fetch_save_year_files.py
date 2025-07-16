@@ -1,7 +1,7 @@
 import os
 import requests
 
-def download_noaa_year_txt(station_id,date):
+def download_noaa_year_txt(station_id, date):
     # set local paths to save files
     save_dir = f"D:\\Buoy_work\\Raws Storage\\NOAA_Raws\\year\\{station_id}"
     txt_loc_path = f"{save_dir}\\{date}_year_{station_id}.txt"

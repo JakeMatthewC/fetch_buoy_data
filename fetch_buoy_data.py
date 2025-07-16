@@ -8,32 +8,50 @@ import processes.storm_buoy_match as sbm
 from fetch_data.fetch_from_rt import fetch_from_rt
 from fetch_data.fetch_from_year import fetch_from_year
 from fetch_data.fetch_from_api import fetch_from_api
+from fetch_data.fetch_from_cdip import fetch_from_cdip
 
 # file name parameters
-file_station_id = [41010]
+file_station_id = [244]
 file_date = ["2024"]
-file_type = ["year"]
+file_type = ["cdip"]
+cdip_deployment = 5
+
+# directional distributions to save to database
+start_date = pd.to_datetime('2021-01-01').tz_localize("UTC")
+end_date = pd.to_datetime('2021-12-31').tz_localize("UTC")
+save_is_storm = True
 
 for station_id,f_date,f_type in zip(file_station_id,file_date,file_type):
-    if f_type == 'rt':
+    if f_type == 'noaa-rt':
         df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2 = fetch_from_rt(station_id,f_date)
 
-    elif f_type == 'year':
+    elif f_type == 'noaa-year':
         df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2 = fetch_from_year(station_id,f_date)
 
-    elif f_type == 'api':
+    elif f_type == 'noaa-api':
         df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2 = fetch_from_api(station_id,f_date)
+
+    elif f_type == 'cdip':
+        df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2 = fetch_from_cdip(station_id, cdip_deployment)
 
     # perform calcs for bulk parameters at each timestep
     df_txt = u.df_txt_calcs(df_txt, df_data_spec)
+
+    # get ENSO index values for the timesteps
+
+
+    # get tidal values for the timesteps
+    
 
     # move processed timesteps to database
     cur = c.conn.cursor()
     u.insert_time_steps(cur, df_txt, f_type)
     c.conn.commit()
+    print("Timesteps uploaded to database if applicable.")
 
     # perform storm analysis at each timestep
-    df_txt = sbm.storm_buoy_match(cur, None, df_txt)
+    df_txt, storm_dict = sbm.storm_buoy_match(cur, None, df_txt)
+    print("Completed storm-buoy matches.")
 
     # filter the timesteps to only unprocessed ones
     # check for spectrum ingested flag across timesteps
@@ -53,4 +71,5 @@ for station_id,f_date,f_type in zip(file_station_id,file_date,file_type):
     df_swdir2 = df_swdir2[df_swdir2['datetime'].isin(dt_index)].reset_index(drop=True)
 
     # process for calculating D and determining modality
-    calc_D.calc_D(df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_type)
+    calc_D.calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_type, start_date, end_date, save_is_storm)
+    print("Completed processing buoy.")
