@@ -85,7 +85,7 @@ def get_station_lat_lon(buoy_id):
         SELECT b.lat, b.lon
         FROM dirspec.buoys b
         WHERE b.id = :buoy_id      
-    """), conn, params={"buoy": buoy_id})  
+    """), conn_eng, params={"buoy_id": buoy_id})  
     return df    
 
 def get_storm_name(hurdat_storm_id):

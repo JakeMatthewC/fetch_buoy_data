@@ -17,16 +17,13 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
         swr1_row = df_swr1.iloc[i,:]
         swr2_row = df_swr2.iloc[i,:]
 
-        # check that all files have the timestep
-        if spec_row['datetime'] == swdir_row['datetime'] and spec_row['datetime'] == swdir2_row['datetime'] and spec_row['datetime'] == swr1_row['datetime'] and spec_row['datetime'] == swr2_row['datetime']:
+        # check that all rows have the timestep
+        datetime_obj = spec_row['datetime']
+        if all(datetime_obj == row['datetime'] for row in [swdir_row, swdir2_row, swr1_row, swr2_row]):
             pass
         else:
             print('Datetime mismatch')
             sys.exit()
-            break
-
-        # save the datetime object for reference later
-        datetime_obj = spec_row['datetime']
         
         if f_type == 'noaa-rt' or f_type == 'noaa-api':
             # drop the unneeded rows for calculations
@@ -39,6 +36,7 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
         swr2_row = swr2_row.iloc[2:]
 
         # prepare for vectorized calculation
+        # alpha assumed as met in degrees
         alpha1 = pd.to_numeric(swdir_row, errors='coerce')
         alpha1 = np.where(~np.isnan(alpha1), u.met_to_math_dir(alpha1), np.nan)
         alpha1 = alpha1.astype(float)
@@ -67,12 +65,9 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
         D = np.maximum(D, 0)
         
         row_sums = np.sum(D, axis=1, keepdims=True) * c.delta_theta_rad
-        # prevent division by 0
         row_sums[row_sums == 0] = 1
         # normalize
         D_normalized = D / row_sums
-        #check = np.sum(D_normalized, axis=1, keepdims=True) * delta_theta_rad
-        #print(check)
 
         S = D_normalized * E
 
@@ -83,7 +78,6 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
         records_param = []
         records_dir = []
         for m, f in enumerate(c.noaa_freqs):
-            # these values are recorded to every row for this frequency bin
             a_1 = float(u.math_to_met_dir(alpha1[m])) if not np.isnan(alpha1[m]) else None
             a_2 = float(u.math_to_met_dir(alpha2[m])) if not np.isnan(alpha2[m]) else None
             r_1 = float(r1[m]) if not np.isnan(r1[m]) else None
@@ -106,7 +100,7 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
 
         records_dir = [(int(timestep_id), float(f), int(theta), float(spreading)) for (timestep_id, f, theta, spreading) in records_dir]
 
-        # Now determine modality and record for each timestep
+        # determine modality and record for each timestep
         modality_res = dm.detect_modality_from_dmatrix(S)
 
         in_date_range = (start_date <= datetime_obj <= end_date)
@@ -123,7 +117,6 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
 
             c.conn.commit()
 
-            # update flag
             c.cur.execute("""
                 UPDATE dirspec.time_steps
                 SET modality_boot = %s,     
@@ -133,7 +126,6 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
             c.conn.commit()
 
         else:
-            # update flag
             c.cur.execute("""
                 UPDATE dirspec.time_steps
                 SET modality_boot = %s,     

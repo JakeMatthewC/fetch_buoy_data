@@ -53,7 +53,6 @@ def storm_buoy_match(cur, storm_df, buoy_df, max_distance_km=400):
 
     # adding new buoy condition
     elif buoy_df is not None:
-        # create a dictionary for later when uploading timesteps with storm
         storm_dict = {}
 
         # find the start and end timestamps for the buoy data being pulled in
@@ -65,7 +64,6 @@ def storm_buoy_match(cur, storm_df, buoy_df, max_distance_km=400):
         # get stormtrack timesteps within this timeframe
         storms_within_timestamps = find_storms_within_timestamps(start_datetime, end_datetime)
 
-        # loop through the stormtrack timesteps
         for _, storm_row in storms_within_timestamps.iterrows():
             storm_timestamp = storm_row['timestamp']
             
@@ -73,8 +71,6 @@ def storm_buoy_match(cur, storm_df, buoy_df, max_distance_km=400):
             buoy_ts = find_buoy_timestamp(storm_timestamp, station_id)
             if buoy_ts.empty == False:
                 timestamp = buoy_ts['timestamp'].iloc[0]
-
-                # pull the associated row form the buoy dataframe
                 buoy_df_timestep = buoy_df[buoy_df['datetime'] == timestamp]
 
                 # check for conditions to set is_storm=True
@@ -92,7 +88,6 @@ def storm_buoy_match(cur, storm_df, buoy_df, max_distance_km=400):
                         buoy_df_timestep, storm_name = update_buoy_time_steps(buoy_row, storm_row, dist)
                         update_time_steps_table(cur, buoy_row, storm_name, time_step_id)
 
-                        # add to dictionary for later
                         storm_dict[time_step_id] = True
 
         return buoy_df, storm_dict

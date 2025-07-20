@@ -7,11 +7,12 @@ from dateutil.rrule import rrule, MONTHLY
 from scipy.interpolate import interp1d
 
 # modules
+import processes.utils as u
 import data.query as q
 import config.config as c
 from fetch_data.fetch_from_era5 import fetch_from_era5
 
-def fetch_cdip_file(station_id: int, deployment: int = 5, cdip_output_file: str = None) -> xr.Dataset | None:
+def fetch_cdip_file(station_id: int, deployment: int, cdip_output_file: str = None) -> xr.Dataset | None:
     """
     Fetch CDIP NetCDF dataset via THREDDS OPeNDAP.
 
@@ -42,7 +43,7 @@ def fetch_cdip_file(station_id: int, deployment: int = 5, cdip_output_file: str 
             print(f"[CDIP FETCH ERROR] Station {station_id}, deployment {deployment}: {e}")
             return None
 
-def fetch_from_cdip(station_id: int, deployment: int = 5) -> xr.Dataset | None:   
+def fetch_from_cdip(station_id: int, deployment: int) -> xr.Dataset | None:   
     # set local location for the raw data
     cdip_output_file= rf"D:\Buoy_work\Raws Storage\CDIP Raws\{station_id}\cdip_{station_id}_d{deployment:02d}.nc"
 
@@ -52,7 +53,7 @@ def fetch_from_cdip(station_id: int, deployment: int = 5) -> xr.Dataset | None:
     if ds is not None:
         # --- Buoy Metadata ---
         name = ds['metaStationName'].values.item()  
-        name_str = name.decode('utf-8').strip()         # e.g. 'SANTA MONICA BASIN'
+        name_str = name.decode('utf-8').strip()
         lat = ds['metaDeployLatitude'].values.item()
         lon = ds['metaDeployLongitude'].values.item()
         depth = ds['metaWaterDepth'].values.item()
@@ -66,11 +67,9 @@ def fetch_from_cdip(station_id: int, deployment: int = 5) -> xr.Dataset | None:
         # Convert to datetime:  
         timestamp = pd.to_datetime(wave_time, unit='s')
 
-        # set start and end times to fetch from era5
+        # fetch met data from era5 in month-long chunks
         era5_start_time = timestamp.min()
         era5_end_time = timestamp.max()
-
-        # fetch met data from era5
         date_ranges = list(rrule(freq=MONTHLY, dtstart=era5_start_time, until=era5_end_time))
 
         df_met_list = []
@@ -86,10 +85,10 @@ def fetch_from_cdip(station_id: int, deployment: int = 5) -> xr.Dataset | None:
         met_df = pd.concat(df_met_list).sort_values('datetime').reset_index(drop=True)
 
         # CDIP typically does not provide wind, gust, pressure, or tide. getting that from era5 instead
-        wvht = ds['waveHs'].values                             # significant wave height (m)
-        dpd = ds['waveTp'].values                              # peak period (s)
-        apd = ds['waveTa'].values                              # average period (s)
-        mwd = ds['waveDp'].values                              # mean wave direction (°)
+        wvht = ds['waveHs'].values
+        dpd = ds['waveTp'].values
+        apd = ds['waveTa'].values
+        mwd = ds['waveDp'].values
         
         # Not typically included, but placeholder fields:
         wtmp = np.full(len(timestamp), np.nan)
@@ -150,28 +149,16 @@ def fetch_from_cdip(station_id: int, deployment: int = 5) -> xr.Dataset | None:
         # calculate alpha and r values
         # r1, r2 = sqrt(a1² + b1²), sqrt(a2² + b2²)
         # α1, α2 = atan2(b1, a1), atan2(b2, a2)
-        r1 = np.sqrt(a1_noaa**2 + b1_noaa**2)     # shape: (ntime, nfreq)
+        r1 = np.sqrt(a1_noaa**2 + b1_noaa**2)
         r2 = np.sqrt(a2_noaa**2 + b2_noaa**2)
 
-        alpha1 = np.degrees(np.arctan2(b1_noaa, a1_noaa))
-        alpha2 = np.degrees(np.arctan2(b2_noaa, a2_noaa))
+        alpha1 = np.arctan2(b1_noaa, a1_noaa)
+        alpha2 = np.arctan2(b2_noaa, a2_noaa)
 
-        '''
-        # interpolate values to noaa standard
-        cdip_Ef_interp = interpolate_cdip(cdip_freqs, Ef, c.freqs)
-        cdip_r1_interp = interpolate_cdip(cdip_freqs, r1, c.freqs)
-        cdip_r2_interp = interpolate_cdip(cdip_freqs, r2, c.freqs)
+        # convert to met degrees for calc_D function
+        alpha1 = np.where(~np.isnan(alpha1), u.math_to_met_dir(alpha1), np.nan)
+        alpha2 = np.where(~np.isnan(alpha2), u.math_to_met_dir(alpha2), np.nan)
 
-        cdip_alpha1_cos = interpolate_cdip(cdip_freqs, np.cos(np.radians(alpha1)), c.freqs)
-        cdip_alpha1_sin = interpolate_cdip(cdip_freqs, np.sin(np.radians(alpha1)), c.freqs)
-        cdip_alpha1_interp = np.degrees(np.arctan2(cdip_alpha1_sin, cdip_alpha1_cos)) % 360
-
-        cdip_alpha2_cos = interpolate_cdip(cdip_freqs, np.cos(np.radians(alpha2)), c.freqs)
-        cdip_alpha2_sin = interpolate_cdip(cdip_freqs, np.sin(np.radians(alpha2)), c.freqs)
-        cdip_alpha2_interp = np.degrees(np.arctan2(cdip_alpha2_sin, cdip_alpha2_cos)) % 360
-        '''
-
-        # build the output dataframes for the ingestion pipeline
         meta_buoy = {
             'station_id': station_id,
             'name': name_str,

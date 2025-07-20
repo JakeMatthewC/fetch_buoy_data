@@ -7,12 +7,12 @@ def fetch_from_year(station_id, date):
 
     import processes.utils as u
     # look for local annual bulk file for given year
-    df_txt = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.txt", sep='\s+', skiprows=[1], na_values=["MM",'999.0'])
-    df_data_spec = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.data_spec", sep='\s+', skiprows=[1], na_values=["MM",'999.0'])
-    df_swdir = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swdir", sep='\s+', skiprows=[1], na_values=["MM",'999.0'])
-    df_swdir2 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swdir2", sep='\s+', skiprows=[1], na_values=["MM",'999.0'])
-    df_swr1 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swr1", sep='\s+', skiprows=[1], na_values=["MM",'999.0'])
-    df_swr2 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swr2", sep='\s+', skiprows=[1], na_values=["MM",'999.0'])
+    df_txt = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.txt", sep='\s+', skiprows=[1], na_values=["MM",'999.0','99'])
+    df_data_spec = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.data_spec", sep='\s+', skiprows=[1], na_values=["MM",'999.0','99'])
+    df_swdir = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swdir", sep='\s+', skiprows=[1], na_values=["MM",'999.0','99'])
+    df_swdir2 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swdir2", sep='\s+', skiprows=[1], na_values=["MM",'999.0','99'])
+    df_swr1 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swr1", sep='\s+', skiprows=[1], na_values=["MM",'999.0','99'])
+    df_swr2 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swr2", sep='\s+', skiprows=[1], na_values=["MM",'999.0','99'])
 
     df_list = [df_txt,df_data_spec,df_swdir,df_swr1,df_swdir2,df_swr2]
     for df in df_list:

@@ -11,72 +11,110 @@ conn = psycopg2.connect(
 def create_tables(conn):
     with conn.cursor() as cur:
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS dirspec.buoys (
-                id SERIAL PRIMARY KEY,
-                station_id TEXT UNIQUE NOT NULL,
+            CREATE TABLE dirspec.buoys (
+                id,
+                station_id TEXT,
                 name TEXT,
-                lat DOUBLE PRECISION,
-                lon DOUBLE PRECISION,
-                depth DOUBLE PRECISION
+                lat FLOAT,
+                lon FLOAT,
+                depth FLOAT,
+
+                PRIMARY KEY (id)
             );
         """)
 
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS dirspec.time_steps (
-                id SERIAL PRIMARY KEY,
-                buoy_id INTEGER REFERENCES dirspec.buoys(id),
-                timestamp TIMESTAMPTZ NOT NULL,
+            CREATE TABLE dirspec.time_steps (
+                id,
+                buoy_id TEXT NOT NULL,
+                timestamp TIMESTAMP WITHOUT TIME ZONE NOT NULL,
 
-                -- Observational metadata
-                wdir INTEGER,                     -- Wind direction (degrees)
-                wspd DOUBLE PRECISION,            -- Wind speed (m/s or knots)
-                gst  DOUBLE PRECISION,            -- Wind gust (m/s or knots)
-                wvht DOUBLE PRECISION,            -- Significant wave height [m]
-                dpd  DOUBLE PRECISION,            -- Dominant period [s]
-                apd  DOUBLE PRECISION,            -- Average period [s]
-                mwd  DOUBLE PRECISION,            -- Mean wave direction (from) [deg]
-                pres DOUBLE PRECISION,            -- Atmospheric pressure [hPa]
-                atmp DOUBLE PRECISION,            -- Air temp [°C]
-                wtmp DOUBLE PRECISION,            -- Water temp [°C]
-                dewp DOUBLE PRECISION,            -- Dew point [°C]
-                vis  DOUBLE PRECISION,            -- Visibility [nmi]
-                ptdy DOUBLE PRECISION,            -- Pressure tendency [hPa]
-                tide DOUBLE PRECISION,            -- Tide level [ft or m]
+                -- Wind and meteorological data
+                wdir FLOAT,              -- Wind direction
+                wspd FLOAT,              -- Wind speed
+                gst FLOAT,               -- Gust speed
 
-                -- Derived spectral parameters
-                m0   DOUBLE PRECISION,            -- Spectral moment 0
-                hm0  DOUBLE PRECISION,            -- Significant wave height from spectrum
-                m_1  DOUBLE PRECISION,            -- Spectral moment 1
-                Te   DOUBLE PRECISION,            -- Energy period
-                P    DOUBLE PRECISION,            -- Wave power [kW/m]
-                    
-                spectra_ingested BOOLEAN DEFAULT FALSE, -- Marker to record that spectral data was ingested for the timestep
+                -- Wave parameters
+                wvht FLOAT,              -- Significant wave height
+                dpd FLOAT,               -- Dominant period
+                apd FLOAT,               -- Average period
+                mwd FLOAT,               -- Mean wave direction
 
-            UNIQUE (buoy_id, timestamp)
+                -- Atmospheric & temperature data
+                pres FLOAT,              -- Pressure
+                atmp FLOAT,              -- Air temperature
+                wtmp FLOAT,              -- Water temperature
+                dewp FLOAT,              -- Dew point
+                vis FLOAT,               -- Visibility
+                ptdy FLOAT,              -- Pressure tendency
+
+                -- Tide & spectral moments (these are all calculated during ingestion)
+                tide FLOAT,
+                m0 FLOAT,
+                hm0 FLOAT,
+                m_1 FLOAT,
+                te FLOAT,
+                p FLOAT,
+
+                -- Ingestion and source tracking
+                spectra_ingested BOOLEAN DEFAULT FALSE,
+                source TEXT,
+
+                -- Storm-related metadata
+                storm_name TEXT,
+                storm_type TEXT,
+                storm_heading_deg FLOAT,
+                storm_speed_kts FLOAT,
+                storm_distance_km FLOAT,
+                storm_section_9 TEXT,
+                hurdat_storm_id TEXT,
+                is_storm BOOLEAN DEFAULT FALSE,
+
+                -- Modality classification
+                modality_boot TEXT,          -- e.g., 'unimodal', 'bimodal'
+                modality_model TEXT,         -- model used
+                modality_conf FLOAT,         -- confidence
+                modality_ver TEXT,           -- model version
+
+                -- Source attribution
+                met_source TEXT,
+                tide_source TEXT,
+                tide_method TEXT,
+
+                PRIMARY KEY (buoy_id, timestamp),
+                FOREIGN KEY (buoy_id) REFERENCES dirspec.buoys (buoy_id)
             );
+
         """)
 
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS dirspec.spectra_parameters (
-                time_step_id INTEGER REFERENCES dirspec.time_steps(id),
-                frequency DOUBLE PRECISION,
-                alpha1 DOUBLE PRECISION,
-                alpha2 DOUBLE PRECISION,
-                r1 DOUBLE PRECISION,
-                r2 DOUBLE PRECISION,
-                energy_density DOUBLE PRECISION,
-                UNIQUE (time_step_id, frequency, direction)
+            CREATE TABLE dirspec.spectra_parameters (
+                time_step_id TEXT,
+                frequency FLOAT,          -- Frequency (Hz)
+
+                energy_density FLOAT,            -- Energy density
+                r1 FLOAT,
+                r2 FLOAT,
+                alpha1 FLOAT,
+                alpha2 FLOAT,
+
+                PRIMARY KEY (time_step_id, frequency),
+                FOREIGN KEY (time_step_id) REFERENCES dirspec.time_steps (id)
             );
+
         """)
 
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS dirspec.spectra_directional (
-                time_step_id INTEGER REFERENCES dirspec.time_steps(id),
-                frequency DOUBLE PRECISION,
-                direction INTEGER,
-                spreading DOUBLE PRECISION,
-                UNIQUE (time_step_id, frequency, direction)
+            CREATE TABLE dirspec.spectra_directional (
+                time_step_id TEXT,
+                frequency FLOAT,        -- Frequency (Hz)
+                direction INTEGER,       -- Direction bin (degrees: 0–359)
+                spreading FLOAT,           -- Normalized directional energy (unitless)
+
+                PRIMARY KEY (time_step_id, frequency, direction),
+                FOREIGN KEY (time_step_id) REFERENCES dirspec.time_steps (id)
             );
+
         """)
 
         conn.commit()
