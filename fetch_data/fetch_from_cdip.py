@@ -7,7 +7,6 @@ from dateutil.rrule import rrule, MONTHLY
 from scipy.interpolate import interp1d
 
 # modules
-import processes.utils as u
 import data.query as q
 import config.config as c
 from fetch_data.fetch_from_era5 import fetch_from_era5
@@ -45,7 +44,7 @@ def fetch_cdip_file(station_id: int, deployment: int, cdip_output_file: str = No
 
 def fetch_from_cdip(station_id: int, deployment: int) -> xr.Dataset | None:   
     # set local location for the raw data
-    cdip_output_file= rf"D:\Buoy_work\Raws Storage\CDIP Raws\{station_id}\cdip_{station_id}_d{deployment:02d}.nc"
+    cdip_output_file= rf"{c.cdip_path}\{station_id}\cdip_{station_id}_d{deployment:02d}.nc"
 
     # attempt to fetch from local and pull from THREDDS if not found
     ds = fetch_cdip_file(station_id, deployment, cdip_output_file)
@@ -57,6 +56,7 @@ def fetch_from_cdip(station_id: int, deployment: int) -> xr.Dataset | None:
         lat = ds['metaDeployLatitude'].values.item()
         lon = ds['metaDeployLongitude'].values.item()
         depth = ds['metaWaterDepth'].values.item()
+        project = ds.attrs.get('project')
 
         # --- Frequency Configuration ---
         freq_cdip = ds['waveFrequency'].values                # shape: (nfreq,)
@@ -108,6 +108,36 @@ def fetch_from_cdip(station_id: int, deployment: int) -> xr.Dataset | None:
         wave_b1 = ds['waveB1Value'].values
         wave_b2 = ds['waveB2Value'].values
         
+        # use energy-weighted interp for Ef
+        E_cdip = Ef_cdip * bandwidth_cdip
+        interp_E = interp1d(freq_cdip, E_cdip, axis=1, bounds_error=False, fill_value=0)
+        E_noaa_bins = interp_E(c.noaa_freqs)
+        Ef_interp = E_noaa_bins / c.noaa_bandwidths
+
+        # non-energy weighted for fourier
+        a1_interp = interp1d(freq_cdip, wave_a1, axis=1, bounds_error=False, fill_value=0)
+        a2_interp = interp1d(freq_cdip, wave_a2, axis=1, bounds_error=False, fill_value=0)
+        b1_interp = interp1d(freq_cdip, wave_b1, axis=1, bounds_error=False, fill_value=0)
+        b2_interp = interp1d(freq_cdip, wave_b2, axis=1, bounds_error=False, fill_value=0)
+
+        a1_noaa_interp = a1_interp(c.noaa_freqs)
+        a2_noaa_interp = a2_interp(c.noaa_freqs)
+        b1_noaa_interp = b1_interp(c.noaa_freqs)
+        b2_noaa_interp = b2_interp(c.noaa_freqs)
+
+        # compute r and alpha
+        r1 = np.sqrt(a1_noaa_interp**2 + b1_noaa_interp**2)
+        r2 = np.sqrt(a2_noaa_interp**2 + b2_noaa_interp**2)
+
+        alpha1_rad = np.arctan2(b1_noaa_interp, a1_noaa_interp)
+        alpha2_rad = np.arctan2(b2_noaa_interp, a2_noaa_interp)
+
+        # convert to meteorological & degrees
+        alpha1_met = (270 - np.degrees(alpha1_rad)) % 360
+        alpha2_met = (270 - np.degrees(alpha2_rad)) % 360
+
+        # not using enery-weighted fourier currently, but commented out in case needed in future
+        '''
         # create energy-weighted values for interpolation
         E_cdip = Ef_cdip * bandwidth_cdip
         Ea1 = E_cdip * wave_a1
@@ -157,14 +187,12 @@ def fetch_from_cdip(station_id: int, deployment: int) -> xr.Dataset | None:
 
         # convert to met degrees for calc_D function
         alpha1 = np.where(~np.isnan(alpha1), u.math_to_met_dir(alpha1), np.nan)
-        alpha2 = np.where(~np.isnan(alpha2), u.math_to_met_dir(alpha2), np.nan)
+        alpha2 = np.where(~np.isnan(alpha2), u.math_to_met_dir(alpha2), np.nan)'''
 
         meta_buoy = {
             'station_id': station_id,
             'name': name_str,
-            'lat': lat,
-            'lon': lon,
-            'depth': depth
+            'project': project
         }
         
         df_txt_buoy = pd.DataFrame({
@@ -199,12 +227,12 @@ def fetch_from_cdip(station_id: int, deployment: int) -> xr.Dataset | None:
         df_data_spec.insert(0, 'station_id', station_id)
         df_data_spec['datetime'] = pd.to_datetime(df_data_spec['datetime']).dt.tz_localize('UTC')
 
-        df_swdir = pd.DataFrame(alpha1, columns=c.noaa_freqs)
+        df_swdir = pd.DataFrame(alpha1_met, columns=c.noaa_freqs)
         df_swdir.insert(0, 'datetime', timestamp)
         df_swdir.insert(0, 'station_id', station_id)
         df_swdir['datetime'] = pd.to_datetime(df_swdir['datetime']).dt.tz_localize('UTC')
 
-        df_swdir2 = pd.DataFrame(alpha2, columns=c.noaa_freqs)
+        df_swdir2 = pd.DataFrame(alpha2_met, columns=c.noaa_freqs)
         df_swdir2.insert(0, 'datetime', timestamp)
         df_swdir2.insert(0, 'station_id', station_id)
         df_swdir2['datetime'] = pd.to_datetime(df_swdir2['datetime']).dt.tz_localize('UTC')
@@ -223,7 +251,25 @@ def fetch_from_cdip(station_id: int, deployment: int) -> xr.Dataset | None:
 
         # save buoy metadata to buoys table
         cur = c.conn.cursor()
-        q.insert_cdip_buoy(cur, meta_buoy)
+        q.insert_buoy(cur, meta_buoy)
         c.conn.commit()
 
-        return df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2
+        # save to buoy deployments table
+        buoy_id = q.get_buoy_id(str(station_id))
+        buoy_id = buoy_id.loc[0,'id']
+        deployment_id = deployment
+        buoy_deploy = {
+            'buoy_id': buoy_id,
+            'deployment_id': deployment_id,
+            'start_time': df_txt['datetime'].min(),
+            'end_time': df_txt['datetime'].max(),
+            'latitude': lat,
+            'longitude': lon,
+            'deployment_type': 'CDIP',
+            'depth': float(depth)
+        }
+
+        q.insert_deployment(cur, buoy_deploy)
+        c.conn.commit()
+
+        return df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, deployment_id

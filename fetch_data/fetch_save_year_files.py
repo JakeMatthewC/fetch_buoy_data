@@ -1,9 +1,10 @@
 import os
 import requests
+import config.config as c
 
 def download_noaa_year_txt(station_id, date):
     # set local paths to save files
-    save_dir = f"D:\\Buoy_work\\Raws Storage\\NOAA_Raws\\year\\{station_id}"
+    save_dir = f"{c.noaa_year_path}\\{station_id}"
     txt_loc_path = f"{save_dir}\\{date}_year_{station_id}.txt"
     data_spec_loc_path = f"{save_dir}\\{date}_year_{station_id}.data_spec"
     swdir_loc_path = f"{save_dir}\\{date}_year_{station_id}.swdir"
@@ -37,9 +38,9 @@ def download_noaa_year_txt(station_id, date):
 
     os.makedirs(save_dir, exist_ok=True)
 
-    for path,url,id in zip(loc_path_list, url_list, id_list):
+    for path, url, id in zip(loc_path_list, url_list, id_list):
         if os.path.exists(path):
-            print(f"Already exists: {path}")
+            print(f"Loading cached file: {path}")
             continue
         
         try:

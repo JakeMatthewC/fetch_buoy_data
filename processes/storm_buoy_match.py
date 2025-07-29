@@ -16,7 +16,7 @@ CONN_STR = "postgresql+psycopg2://Jacob:@localhost:5432/postgres"
 engine = create_engine(CONN_STR)
 conn_eng = engine.connect() 
 
-def storm_buoy_match(cur, storm_df, buoy_df, max_distance_km=400):
+def storm_buoy_match(cur, storm_df, buoy_df, max_distance_km, deployment_id):
     # if updating storms tables or adding a buoy
     # for each stormtrack timestep -> filter to buoy timesteps within 15 min of the timestep
     # check haversine distance and windspeed at buoy at the timesteps
@@ -68,7 +68,8 @@ def storm_buoy_match(cur, storm_df, buoy_df, max_distance_km=400):
             storm_timestamp = storm_row['timestamp']
             
             # query the buoy timestep closest to the stormtrack timestep
-            buoy_ts = find_buoy_timestamp(storm_timestamp, station_id)
+            buoy_id = get_buoy_id(station_id)
+            buoy_ts = find_buoy_timestamp(storm_timestamp, buoy_id, deployment_id)
             if buoy_ts.empty == False:
                 timestamp = buoy_ts['timestamp'].iloc[0]
                 buoy_df_timestep = buoy_df[buoy_df['datetime'] == timestamp]
@@ -91,6 +92,12 @@ def storm_buoy_match(cur, storm_df, buoy_df, max_distance_km=400):
                         storm_dict[time_step_id] = True
 
         return buoy_df, storm_dict
+    
+def get_buoy_id(station_id):
+    # Get buoy ID (assumes station_id already inserted in buoys)
+    buoy_id = pd.read_sql(text("""SELECT id FROM dirspec.buoys WHERE station_id = :station_id
+        """), conn_eng, params={"station_id": station_id})
+    return buoy_id.loc[0, 'id']
 
 def find_buoys_with_timestamp(storm_timestamp):   
     df = pd.read_sql(text("""
@@ -102,15 +109,16 @@ def find_buoys_with_timestamp(storm_timestamp):
     """), conn_eng, params={"storm_timestamp": storm_timestamp})
     return df
 
-def find_buoy_timestamp(storm_timestamp, station_id):
+def find_buoy_timestamp(storm_timestamp, buoy_id, deployment_id):
     df = pd.read_sql(text("""
         SELECT ts.id, ts.timestamp, b.lat, b.lon  
         FROM dirspec.time_steps ts
-        JOIN dirspec.buoys b on ts.buoy_id = b.id
+        JOIN dirspec.buoy_deployments b on ts.buoy_id = b.buoy_id
         WHERE ts.timestamp BETWEEN (:storm_timestamp - INTERVAL '15 minutes')
                                AND (:storm_timestamp + INTERVAL '15 minutes')  
-        AND b.station_id = :station_id  
-    """), conn_eng, params={"storm_timestamp": storm_timestamp, "station_id": station_id})
+        AND b.buoy_id = :buoy_id  
+        AND b.deployment_id = :deployment_id
+    """), conn_eng, params={"storm_timestamp": storm_timestamp, "buoy_id": int(buoy_id), "deployment_id": str(deployment_id)})
     return df
 
 def find_stormtracks_with_timestamp(buoy_timestamp):
@@ -122,20 +130,6 @@ def find_stormtracks_with_timestamp(buoy_timestamp):
                                   AND (st.timestamp + INTERVAL '15 minutes')    
     """), conn_eng, params={"buoy_timestamp": buoy_timestamp})   
     return df
-
-def get_buoy_id(station_id):
-    # Get buoy ID (assumes station_id already inserted in buoys)
-    buoy_id = pd.read_sql(text("""SELECT id FROM dirspec.buoys WHERE station_id = :station_id
-        """), conn_eng, params={"station_id": station_id})
-    return int(buoy_id.loc[0,'id'])
-
-def get_station_lat_lon(buoy_id):   
-    df = pd.read_sql(text("""
-        SELECT b.lat, b.lon
-        FROM dirspec.buoys b
-        WHERE b.id = :buoy_id      
-    """), conn_eng, params={"buoy_id": buoy_id})  
-    return df    
 
 def get_storm_name(hurdat_storm_id):
     df = pd.read_sql(text("""

@@ -1,5 +1,5 @@
 from sqlalchemy import create_engine, text
-from psycopg2.extras import execute_values, Json
+from psycopg2.extras import execute_values
 import pandas as pd
 import psycopg2
 
@@ -40,15 +40,27 @@ def insert_ts_row(cur, buoy_id, row):
         safe_val(row.get('m_1')), safe_val(row.get('Te')), safe_val(row.get('P'))
     ))
 
-def insert_cdip_buoy(cur, meta_buoy):
+def insert_buoy(cur, meta_buoy):
     cur.execute("""
         INSERT INTO dirspec.buoys (
-            station_id, name, lat, lon, depth            
+            station_id, name, project           
         )
-        VALUES (%s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s)
         ON CONFLICT (station_id) DO NOTHING;        
     """, (
-        meta_buoy['station_id'], meta_buoy['name'], meta_buoy['lat'], meta_buoy['lon'], meta_buoy['depth']
+        meta_buoy['station_id'], meta_buoy['name'], meta_buoy['project']
+    ))
+
+def insert_deployment(cur, buoy_deploy):
+    cur.execute("""
+        INSERT INTO dirspec.buoy_deployments (
+            buoy_id, deployment_id, start_time, end_time, lat, lon, deployment_type, depth
+        )  
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (deployment_id, start_time, end_time) DO NOTHING;                 
+    """, (
+        int(buoy_deploy['buoy_id']), str(buoy_deploy['deployment_id']), buoy_deploy['start_time'], buoy_deploy['end_time'], 
+        float(buoy_deploy['latitude']), float(buoy_deploy['longitude']), str(buoy_deploy['deployment_type']), (buoy_deploy['depth'])
     ))
 
 def get_spec_ing_false(buoy_id):
@@ -80,12 +92,13 @@ def find_stormtracks_with_timestamp(buoy_timestamp):
     """), conn, params={"buoy_timestamp": buoy_timestamp})   
     return df
 
-def get_station_lat_lon(buoy_id):   
+def get_station_lat_lon(buoy_id, deployment_id):   
     df = pd.read_sql(text("""
         SELECT b.lat, b.lon
-        FROM dirspec.buoys b
-        WHERE b.id = :buoy_id      
-    """), conn_eng, params={"buoy_id": buoy_id})  
+        FROM dirspec.buoy_deployments b
+        WHERE b.buoy_id = :buoy_id  
+        AND b.deployment_id = :deployment_id    
+    """), conn_eng, params={"buoy_id": buoy_id, "deployment_id": deployment_id})  
     return df    
 
 def get_storm_name(hurdat_storm_id):

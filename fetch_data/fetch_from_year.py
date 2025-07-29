@@ -1,5 +1,7 @@
 import pandas as pd
 import config.config as c
+import data.query as q
+import processes.utils as u
 
 def fetch_from_year(station_id, date):
     from fetch_data.fetch_save_year_files import download_noaa_year_txt
@@ -7,12 +9,12 @@ def fetch_from_year(station_id, date):
 
     import processes.utils as u
     # look for local annual bulk file for given year
-    df_txt = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.txt", sep='\s+', skiprows=[1], na_values=["MM",'999.0','99'])
-    df_data_spec = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.data_spec", sep='\s+', skiprows=[1], na_values=["MM",'999.0','99'])
-    df_swdir = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swdir", sep='\s+', skiprows=[1], na_values=["MM",'999.0','99'])
-    df_swdir2 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swdir2", sep='\s+', skiprows=[1], na_values=["MM",'999.0','99'])
-    df_swr1 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swr1", sep='\s+', skiprows=[1], na_values=["MM",'999.0','99'])
-    df_swr2 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swr2", sep='\s+', skiprows=[1], na_values=["MM",'999.0','99'])
+    df_txt = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.txt", sep=r'\s+', skiprows=[1], na_values=["MM",'999.0','99'])
+    df_data_spec = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.data_spec", sep=r'\s+', skiprows=[1], na_values=["MM",'999.0','99'])
+    df_swdir = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swdir", sep=r'\s+', skiprows=[1], na_values=["MM",'999.0','99'])
+    df_swdir2 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swdir2", sep=r'\s+', skiprows=[1], na_values=["MM",'999.0','99'])
+    df_swr1 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swr1", sep=r'\s+', skiprows=[1], na_values=["MM",'999.0','99'])
+    df_swr2 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swr2", sep=r'\s+', skiprows=[1], na_values=["MM",'999.0','99'])
 
     df_list = [df_txt,df_data_spec,df_swdir,df_swr1,df_swdir2,df_swr2]
     for df in df_list:
@@ -51,4 +53,36 @@ def fetch_from_year(station_id, date):
     df_swr1 = df_swr1.reset_index(drop=True)
     df_swr2 = df_swr2.reset_index(drop=True)
 
-    return df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2
+    row = u.get_noaa_station_row(station_id)
+
+    meta_buoy = {
+        'station_id': station_id,
+        'name': str(row['name']),
+        'project': 'NOAA'
+    }
+
+    cur = c.conn.cursor()
+    q.insert_buoy(cur, meta_buoy)
+    c.conn.commit()
+
+    # save to buoy deployments table
+    buoy_id = q.get_buoy_id(str(station_id))
+    buoy_id = buoy_id.loc[0,'id']
+
+    timestamps = df_txt['datetime']
+    deployment_id = f"NOAA-{station_id}-{date}"
+    buoy_deploy = {
+        'buoy_id': buoy_id,
+        'deployment_id': deployment_id,
+        'start_time': timestamps.min(),
+        'end_time': timestamps.max(),
+        'latitude': row['lat'],
+        'longitude': row['lon'],
+        'deployment_type': 'NOAA',
+        'depth': None
+    }
+
+    q.insert_deployment(cur, buoy_deploy)
+    c.conn.commit()
+
+    return df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, deployment_id

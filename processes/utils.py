@@ -96,6 +96,12 @@ def haversine(lat1, lon1, lat2, lon2):
     a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
     return 2 * R * atan2(sqrt(a), sqrt(1 - a))
 
+def get_noaa_station_row(station_id):
+    station_list = pd.read_xml(c.noaa_stations_path)
+    station_list['id'] = station_list['id'].astype(str)
+    row = station_list.loc[station_list['id'] == str(station_id)]
+    return row
+
 def df_txt_calcs(df_txt, df_data_spec):
     bandwidths = c.noaa_bandwidths
 
@@ -162,7 +168,7 @@ def date_chunks(start_date, end_date, days=30):
         start = chunk_end + timedelta(days=1)
     return chunks
 
-def get_tidal_data(df_txt):
+def get_tidal_data(df_txt, deployment):
     with open(c.stations_path, 'r') as f:
         stations = json.load(f)['stations']
 
@@ -176,7 +182,8 @@ def get_tidal_data(df_txt):
     } for s in stations])
 
     # get station lat and lon
-    df_lat_lon = q.get_station_lat_lon(df_txt.loc[0,'station_id'])
+    buoy_id = q.get_buoy_id(df_txt.loc[0,'station_id'])
+    df_lat_lon = q.get_station_lat_lon(int(buoy_id.loc[0,'id']), str(deployment))
 
     # calculate haversine distances
     df_stations['distance_km'] = df_stations.apply(

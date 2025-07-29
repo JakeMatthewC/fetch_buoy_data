@@ -11,10 +11,11 @@ from fetch_data.fetch_from_api import fetch_from_api
 from fetch_data.fetch_from_cdip import fetch_from_cdip
 
 # file name parameters
-file_station_id = [144]
+file_station_id = [44014]
+
+file_type = ["noaa-year"]
 file_date = ["2024"]
-file_type = ["cdip"]
-cdip_deployments = [17]
+cdip_deployments = [16]
 
 # directional distributions to save to database
 start_date = pd.to_datetime('2021-01-01').tz_localize("UTC")
@@ -26,11 +27,11 @@ for station_id, f_date, f_type, cdip_deployment in zip(file_station_id, file_dat
         case 'noaa-rt':
             df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2 = fetch_from_rt(station_id, f_date)
         case 'noaa-year':
-            df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2 = fetch_from_year(station_id, f_date)
+            df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, deployment_id = fetch_from_year(station_id, f_date)
         case 'noaa-api':
             df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2 = fetch_from_api(station_id, f_date)
         case 'cdip':
-            df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2 = fetch_from_cdip(station_id, cdip_deployment)
+            df_txt, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, deployment_id = fetch_from_cdip(station_id, cdip_deployment)
         case _:
             raise ValueError(f"Unsupported file_type entry: {f_type}")
 
@@ -43,7 +44,7 @@ for station_id, f_date, f_type, cdip_deployment in zip(file_station_id, file_dat
     print("ENSO index values assigned to timesteps.")
 
     # get tidal values for the timesteps
-    df_txt = u.get_tidal_data(df_txt)
+    df_txt = u.get_tidal_data(df_txt, deployment_id)
     print("Tidal values assigned to timesteps.")
 
     # move processed timesteps to database
@@ -53,7 +54,7 @@ for station_id, f_date, f_type, cdip_deployment in zip(file_station_id, file_dat
     print("Timesteps uploaded to database if no conflict.")
 
     # perform storm analysis at each timestep
-    df_txt, storm_dict = sbm.storm_buoy_match(cur, None, df_txt)
+    df_txt, storm_dict = sbm.storm_buoy_match(cur, None, df_txt, 400, deployment_id )
     print("Completed storm-buoy matches.")
 
     # filter the timesteps to only unprocessed ones
