@@ -3,6 +3,7 @@ import os
 import pandas as pd
 import xarray as xr
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 from dateutil.rrule import rrule, MONTHLY
 from scipy.interpolate import interp1d
 
@@ -68,8 +69,8 @@ def fetch_from_cdip(station_id: int, deployment: int) -> xr.Dataset | None:
         timestamp = pd.to_datetime(wave_time, unit='s')
 
         # fetch met data from era5 in month-long chunks
-        era5_start_time = timestamp.min()
-        era5_end_time = timestamp.max()
+        era5_start_time = timestamp.min().replace(day=1)
+        era5_end_time = timestamp.max().replace(day=1) + relativedelta(months=1)
         date_ranges = list(rrule(freq=MONTHLY, dtstart=era5_start_time, until=era5_end_time))
 
         df_met_list = []

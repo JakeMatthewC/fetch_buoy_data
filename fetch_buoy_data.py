@@ -11,11 +11,11 @@ from fetch_data.fetch_from_api import fetch_from_api
 from fetch_data.fetch_from_cdip import fetch_from_cdip
 
 # file name parameters
-file_station_id = [44014]
+file_station_id = [144]
 
-file_type = ["noaa-year"]
+file_type = ["cdip"]
 file_date = ["2024"]
-cdip_deployments = [16]
+cdip_deployments = [15]
 
 # directional distributions to save to database
 start_date = pd.to_datetime('2021-01-01').tz_localize("UTC")
