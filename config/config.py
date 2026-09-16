@@ -2,15 +2,11 @@ import numpy as np
 import pandas as pd
 import psycopg2
 
+import config.db as db
+
 ## config and file locations
 # db conns
-conn = psycopg2.connect(
-    dbname="postgres",
-    user="Jacob",
-    password="",
-    host="localhost",
-    port="5432"
-)
+conn = psycopg2.connect(**db.conn_params())
 cur = conn.cursor()
 
 # NOAA active stations xml
@@ -34,7 +30,9 @@ wpm_data = pd.read_excel(wpm_path,header=None,skiprows=1)
 noaa_freqs = np.array(pd.Series(wpm_data.iloc[:,1]))
 noaa_bandwidths = np.array(pd.Series(wpm_data.iloc[:,2]))
 
-# create 360 directional points to iterate over for NOAA buoys
+# 5-degree directional grid for D(theta). These are METEOROLOGICAL bearings
+# (direction FROM, clockwise from true north) -- calc_D builds D directly on this
+# grid so stored directions match alpha1/alpha2 and time_steps.mwd.
 directional_pnts_deg = np.arange(0,360,5)
 directional_pnts = np.deg2rad(directional_pnts_deg)
 theta_grid = directional_pnts[None, :]

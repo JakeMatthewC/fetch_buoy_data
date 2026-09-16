@@ -4,15 +4,11 @@ from sqlalchemy import create_engine, text
 import psycopg2
 from psycopg2.extras import execute_values
 
-conn = psycopg2.connect(
-    dbname="postgres",
-    user="Jacob",
-    password="",
-    host="localhost",
-    port="5432"
-)
+import config.db as db
 
-CONN_STR = "postgresql+psycopg2://Jacob:@localhost:5432/postgres"
+conn = psycopg2.connect(**db.conn_params())
+
+CONN_STR = db.conn_str()
 engine = create_engine(CONN_STR)
 conn_eng = engine.connect() 
 
