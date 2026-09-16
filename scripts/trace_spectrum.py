@@ -43,17 +43,10 @@ def compass(deg):
     return pts[int((deg % 360) / 22.5 + 0.5) % 16]
 
 
-def reconstruct(alpha1_deg, alpha2_deg, r1, r2, dirs=DIRS):
-    """The pipeline's formula, on the meteorological grid."""
-    th = np.deg2rad(dirs.astype(float))
-    D = (1 / (2 * np.pi)) * (
-        1
-        + 2 * r1 * np.cos(th - np.deg2rad(alpha1_deg))
-        + 2 * r2 * np.cos(2 * (th - np.deg2rad(alpha2_deg)))
-    )
-    D = np.maximum(D, 0)
-    total = D.sum() * DTH
-    return D / total if total > 0 else D
+def reconstruct(alpha1_deg, alpha2_deg, r1, r2, dirs=DIRS, method="mem"):
+    """Call the pipeline's own reconstruction -- never a private copy of it."""
+    import processes.directional as dirn
+    return dirn.METHODS[method](alpha1_deg, alpha2_deg, r1, r2, dirs)[0]
 
 
 def rose(D, alpha1_deg, size=15):
@@ -144,9 +137,22 @@ def main():
     print(f"   bandwidth {bw:>6.4f} Hz    from WPM_spectra.xlsx column 3, now stored too")
 
     # --------------------------------------------------------- 3. rebuild D
-    rule("3. RECONSTRUCT D(theta)")
-    print("   D(t) = (1/2pi)[ 1 + 2*r1*cos(t - a1) + 2*r2*cos(2(t - a2)) ], clipped at 0, normalised")
-    D = reconstruct(a1, a2, r1, r2)
+    rule("3. RECONSTRUCT D(theta)   (Maximum Entropy Method)")
+    print("   MEM (Lygre & Krogstad 1986) from c1 = r1*exp(i*a1), c2 = r2*exp(2i*a2)")
+    D = reconstruct(a1, a2, r1, r2, method="mem")
+    D_old = reconstruct(a1, a2, r1, r2, method="truncated_fourier")
+
+    import processes.directional as _dirn
+    for nm, dd in (("MEM", D), ("old 2-term series", D_old)):
+        if not np.all(np.isfinite(dd)):
+            print(f"   {nm:18s} not defined for this bin (r1 -> 1)")
+            continue
+        g1, ga1, _, _ = _dirn.directional_moments(dd[None, :], DIRS)
+        print(f"   {nm:18s} recovers r1 = {float(g1[0]):.4f} (measured {r1:.4f}), "
+              f"alpha1 = {float(ga1[0]):6.1f} (measured {a1:.1f})")
+    if not np.all(np.isfinite(D)):
+        print("\n   MEM is degenerate here; the pipeline stores NULL for this bin.")
+        return 0
     integral = D.sum() * DTH
     peak = int(DIRS[int(np.argmax(D))])
     mx = float((D * np.cos(np.deg2rad(DIRS.astype(float)))).sum() * DTH)

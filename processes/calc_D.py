@@ -8,6 +8,7 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
     import processes.utils as u
     import config.config as c
     import processes.detect_modality as dm
+    import processes.directional as dirn
 
     # loops through each timestep where spec_ingested = False
     for i,spec_row in df_data_spec.iterrows():
@@ -35,22 +36,12 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
         swr1_row = swr1_row.iloc[2:]
         swr2_row = swr2_row.iloc[2:]
 
-        # prepare for vectorized calculation
+        # prepare for vectorized calculation.
         # alpha1/alpha2 arrive as meteorological degrees (direction FROM, clockwise
-        # from true north) -- the same convention as time_steps.mwd.
-        #
-        # D is now built directly on the meteorological grid. cos() is even and the
-        # met<->math map is a reflection (theta_math = 270 - theta_met), so
-        #     cos(theta_math - alpha_math) == cos(theta_met - alpha_met)
-        # and likewise for the 2*(...) harmonic. Staying in met therefore yields a
-        # numerically identical D while putting spectra_directional.direction,
-        # spectra_parameters.alpha1/alpha2 and time_steps.mwd all on ONE convention.
-        # Previously D was built in math space but its bins were stored with math
-        # labels while alpha1/alpha2 were stored as met -- a hidden reflection.
+        # from true north) -- the same convention as time_steps.mwd and as the
+        # direction grid, so no rotation happens anywhere. See processes/directional.py.
         alpha1_deg = pd.to_numeric(swdir_row, errors='coerce').to_numpy(dtype=float) % 360
         alpha2_deg = pd.to_numeric(swdir2_row, errors='coerce').to_numpy(dtype=float) % 360
-        alpha1 = np.deg2rad(alpha1_deg)
-        alpha2 = np.deg2rad(alpha2_deg)
 
         r1 = pd.to_numeric(swr1_row,errors='coerce')
         r1 = np.array(r1)
@@ -60,25 +51,19 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
         Ef = pd.to_numeric(spec_row, errors='coerce')
         Ef = np.array(Ef)
 
-        alpha1_grid = alpha1[:,None]
-        alpha2_grid = alpha2[:, None]
         E = Ef[:, None]
 
-        D = (1 / (2 * np.pi)) * (
-            (1 + 2 * r1[:, None] * np.cos(c.theta_grid - alpha1_grid))
-            + (2 * r2[:, None] * np.cos(2 * (c.theta_grid - alpha2_grid))
-            ))
-        
-        # remove negatives from D output
-        D = np.maximum(D, 0)
-        
-        row_sums = np.sum(D, axis=1, keepdims=True) * c.delta_theta_rad
-        # a missing alpha or r makes the whole row NaN, and `NaN == 0` is False, so
-        # the previous guard let NaN rows through and wrote NaN spreading to postgres
-        valid_row = np.isfinite(row_sums) & (row_sums > 0)
-        # normalize so that the integral of D over theta is 1
-        D_normalized = np.divide(D, row_sums, out=np.full_like(D, np.nan),
-                                 where=valid_row)
+        # Maximum Entropy Method rather than the two-term cosine series. MEM
+        # reproduces the moments the buoy measured; the truncated series does not,
+        # because clipping its negative lobes and renormalising lowers r1 -- which
+        # overstated the directional spread by ~21 deg on real NDBC data. It also
+        # removes the spurious mirror lobe near alpha2+180 that the 180-deg period
+        # of cos(2(theta-alpha2)) always produces when r2 is large.
+        #
+        # processes/directional.py clips, normalises, and returns NaN rows where the
+        # inputs are missing or 1-|c1|^2 collapses (r1 -> 1, ~0.05% of real bins).
+        D_normalized = dirn.mem(alpha1_deg, alpha2_deg, r1, r2, c.directional_pnts_deg)
+        valid_row = np.isfinite(D_normalized).all(axis=1, keepdims=True)
 
         S = D_normalized * E
 
