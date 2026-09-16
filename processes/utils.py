@@ -25,22 +25,31 @@ def insert_time_steps(cur, df_time_steps, f_type):
             met_source = 'ERA5'
 
         if buoy_id:
+            # 'tide' (lower case) is the NOAA Tides & Currents value that
+            # get_tidal_data() interpolates onto the buoy timestamps: metres
+            # relative to MLLW. The upper-case 'TIDE' that used to be written here
+            # is the raw NDBC column, which is in FEET and is a 99.00 fill value in
+            # essentially every record -- the result was that time_steps.tide,
+            # tide_source and tide_method were 100% NULL in every row ingested so
+            # far, and the ENSO index was computed and then dropped on the floor.
             cur.execute("""
                 INSERT INTO dirspec.time_steps (
                     buoy_id, timestamp, WDIR, WSPD, GST, WVHT, DPD, APD, MWD, PRES,
-                    ATMP, WTMP, DEWP, VIS, PTDY, TIDE, m0, hm0, m_1, Te, P, source, met_source
+                    ATMP, WTMP, DEWP, VIS, PTDY, TIDE, m0, hm0, m_1, Te, P, source, met_source,
+                    tide_source, tide_method, enso_mei
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s)
+                        %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (buoy_id, timestamp) DO NOTHING;
             """, (
                 buoy_id[0], row['datetime'],
                 safe_val(row.get('WDIR')), safe_val(row.get('WSPD')), safe_val(row.get('GST')), safe_val(row.get('WVHT')),
                 safe_val(row.get('DPD')), safe_val(row.get('APD')), safe_val(row.get('MWD')), safe_val(row.get('PRES')),
                 safe_val(row.get('ATMP')), safe_val(row.get('WTMP')), safe_val(row.get('DEWP')), safe_val(row.get('VIS')),
-                safe_val(row.get('PTDY')), safe_val(row.get('TIDE')), safe_val(row.get('m0')), safe_val(row.get('hm0')),
-                safe_val(row.get('m_1')), safe_val(row.get('Te')), safe_val(row.get('P')), source, met_source
+                safe_val(row.get('PTDY')), safe_val(row.get('tide')), safe_val(row.get('m0')), safe_val(row.get('hm0')),
+                safe_val(row.get('m_1')), safe_val(row.get('Te')), safe_val(row.get('P')), source, met_source,
+                safe_val(row.get('tide_source')), safe_val(row.get('tide_method')), safe_val(row.get('MEI'))
             ))
 
 def get_unprocessed_timesteps(cur,station_id):
@@ -82,6 +91,25 @@ def datetime_dfs(x,buoy_id):
 
 def safe_val(val):
     return None if pd.isna(val) else val
+
+# NDBC stdmet fill values, per column (ndbc.noaa.gov/measdes.shtml).
+# These cannot go in a single read_csv(na_values=[...]) list: pandas normalises
+# numerically, so a token of '99.0' also matches a bare '99' -- which would blank
+# a legitimate WDIR/MWD of 99 degrees (328 such cells in 42055/2024 alone).
+STDMET_SENTINELS = {
+    'WDIR': 999, 'WSPD': 99.0, 'GST': 99.0,
+    'WVHT': 99.0, 'DPD': 99.0, 'APD': 99.0, 'MWD': 999,
+    'PRES': 9999.0, 'ATMP': 999.0, 'WTMP': 999.0, 'DEWP': 999.0,
+    'VIS': 99.0, 'PTDY': 99.0, 'TIDE': 99.0,
+}
+
+def mask_stdmet_sentinels(df):
+    """Blank NDBC stdmet fill values column by column, leaving real data intact."""
+    for col, fill in STDMET_SENTINELS.items():
+        if col in df.columns:
+            v = pd.to_numeric(df[col], errors='coerce')
+            df[col] = v.mask(v == fill)
+    return df
 
 def met_to_math_dir(angle_deg):
     return np.deg2rad((270 - angle_deg) % 360)
@@ -131,7 +159,7 @@ def get_enso_index(df_txt):
     meiv2_path = r"D:\fetch_buoy_data\resources\meiv2.data"
     
     # load in mei data and melt
-    mei_df = pd.read_csv(meiv2_path, header=None, sep='\s+', names=mei_seasons)
+    mei_df = pd.read_csv(meiv2_path, header=None, sep=r'\s+', names=mei_seasons)
     mei_df = mei_df.reset_index()
     mei_df.rename(columns={'index': 'year'},inplace=True)
     mei_long = mei_df.melt(id_vars='year', var_name='month', value_name='MEI')
@@ -162,7 +190,10 @@ def date_chunks(start_date, end_date, days=30):
     end = pd.to_datetime(end_date)
     
     chunks = []
-    while start < end:
+    # `<=`, not `<`: a deployment whose timesteps all fall on one calendar day has
+    # start == end and previously produced zero chunks, so no tide data was ever
+    # requested and get_tidal_data() blew up on an unassigned tide_df.
+    while start <= end:
         chunk_end = min(start + timedelta(days=days), end)
         chunks.append((start.strftime("%Y%m%d"), chunk_end.strftime("%Y%m%d")))
         start = chunk_end + timedelta(days=1)
@@ -232,6 +263,11 @@ def get_tidal_data(df_txt, deployment):
             if chunk_data:
                 chunk_df = pd.DataFrame(chunk_data)
                 all_data.append(chunk_df)
+
+        if not all_data:
+            raise RuntimeError(
+                f"No tide data returned for station {tide_station_id} between "
+                f"{begin_date} and {end_date}; cannot fill time_steps.tide.")
 
         if all_data:
             tide_df = pd.concat(all_data, ignore_index=True)

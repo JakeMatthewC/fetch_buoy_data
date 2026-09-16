@@ -1,120 +1,74 @@
+"""Create the dirspec / storms schema from scripts/schema_live.sql.
+
+The previous version of this module carried a hand-written CREATE TABLE block
+that had drifted away from the database and could not run at all: `id,` had no
+type, dirspec.buoys was declared with lat/lon/depth columns the live table does
+not have (it has `project`), dirspec.buoy_deployments was missing entirely, and
+the foreign key referenced dirspec.buoys(buoy_id) instead of (id).
+
+The authoritative definition is now scripts/schema_live.sql, produced by:
+
+    pg_dump --schema-only --no-owner --no-privileges -n dirspec -n storms \\
+            -h localhost -U <user> -d <db> -f scripts/schema_live.sql
+
+Regenerate that file whenever the schema changes, and commit it.
+
+Usage:
+    python processes/create_tables.py                 # create if absent
+    python processes/create_tables.py --drop-first    # DESTRUCTIVE, prompts
+
+Honours the PGDIRSPEC_* environment variables, so it can target a scratch
+database instead of production.
+"""
+import argparse
+import io
+import os
+import sys
+
 import psycopg2
 
-conn = psycopg2.connect(
-    dbname="postgres",
-    user="Jacob",
-    password="",
-    host="localhost",
-    port="5432"
-)
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+import config.db as db  # noqa: E402
 
-def create_tables(conn):
+SCHEMA_SQL = os.path.join(REPO, "scripts", "schema_live.sql")
+
+
+def create_tables(conn, drop_first=False):
+    """Apply the schema dump to an open connection."""
+    if not os.path.exists(SCHEMA_SQL):
+        raise FileNotFoundError(
+            f"{SCHEMA_SQL} not found -- regenerate it with pg_dump (see module docstring)")
+    with io.open(SCHEMA_SQL, encoding="utf-8") as fh:
+        sql = fh.read()
     with conn.cursor() as cur:
-        cur.execute("""
-            CREATE TABLE dirspec.buoys (
-                id,
-                station_id TEXT,
-                name TEXT,
-                lat FLOAT,
-                lon FLOAT,
-                depth FLOAT,
+        if drop_first:
+            cur.execute("drop schema if exists dirspec cascade")
+            cur.execute("drop schema if exists storms cascade")
+        cur.execute(sql)
+    conn.commit()
 
-                PRIMARY KEY (id)
-            );
-        """)
 
-        cur.execute("""
-            CREATE TABLE dirspec.time_steps (
-                id,
-                buoy_id TEXT NOT NULL,
-                timestamp TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--drop-first", action="store_true",
+                    help="DROP SCHEMA dirspec/storms CASCADE before creating (destroys all data)")
+    args = ap.parse_args()
 
-                -- Wind and meteorological data
-                wdir FLOAT,              -- Wind direction
-                wspd FLOAT,              -- Wind speed
-                gst FLOAT,               -- Gust speed
+    params = db.conn_params()
+    target = f"{params['host']}:{params['port']}/{params['dbname']}"
 
-                -- Wave parameters
-                wvht FLOAT,              -- Significant wave height
-                dpd FLOAT,               -- Dominant period
-                apd FLOAT,               -- Average period
-                mwd FLOAT,               -- Mean wave direction
+    if args.drop_first:
+        print(f"About to DROP SCHEMA dirspec CASCADE and storms CASCADE on {target}.")
+        print("Every buoy, timestep and spectrum in that database will be destroyed.")
+        if input(f"Type the database name ({params['dbname']}) to confirm: ").strip() != params["dbname"]:
+            sys.exit("aborted")
 
-                -- Atmospheric & temperature data
-                pres FLOAT,              -- Pressure
-                atmp FLOAT,              -- Air temperature
-                wtmp FLOAT,              -- Water temperature
-                dewp FLOAT,              -- Dew point
-                vis FLOAT,               -- Visibility
-                ptdy FLOAT,              -- Pressure tendency
+    conn = psycopg2.connect(**params, connect_timeout=10)
+    create_tables(conn, drop_first=args.drop_first)
+    conn.close()
+    print(f"schema applied to {target}")
 
-                -- Tide & spectral moments (these are all calculated during ingestion)
-                tide FLOAT,
-                m0 FLOAT,
-                hm0 FLOAT,
-                m_1 FLOAT,
-                te FLOAT,
-                p FLOAT,
 
-                -- Ingestion and source tracking
-                spectra_ingested BOOLEAN DEFAULT FALSE,
-                source TEXT,
-
-                -- Storm-related metadata
-                storm_name TEXT,
-                storm_type TEXT,
-                storm_heading_deg FLOAT,
-                storm_speed_kts FLOAT,
-                storm_distance_km FLOAT,
-                storm_section_9 TEXT,
-                hurdat_storm_id TEXT,
-                is_storm BOOLEAN DEFAULT FALSE,
-
-                -- Modality classification
-                modality_boot TEXT,          -- e.g., 'unimodal', 'bimodal'
-                modality_model TEXT,         -- model used
-                modality_conf FLOAT,         -- confidence
-                modality_ver TEXT,           -- model version
-
-                -- Source attribution
-                met_source TEXT,
-                tide_source TEXT,
-                tide_method TEXT,
-
-                PRIMARY KEY (buoy_id, timestamp),
-                FOREIGN KEY (buoy_id) REFERENCES dirspec.buoys (buoy_id)
-            );
-
-        """)
-
-        cur.execute("""
-            CREATE TABLE dirspec.spectra_parameters (
-                time_step_id TEXT,
-                frequency FLOAT,          -- Frequency (Hz)
-
-                energy_density FLOAT,            -- Energy density
-                r1 FLOAT,
-                r2 FLOAT,
-                alpha1 FLOAT,
-                alpha2 FLOAT,
-
-                PRIMARY KEY (time_step_id, frequency),
-                FOREIGN KEY (time_step_id) REFERENCES dirspec.time_steps (id)
-            );
-
-        """)
-
-        cur.execute("""
-            CREATE TABLE dirspec.spectra_directional (
-                time_step_id TEXT,
-                frequency FLOAT,        -- Frequency (Hz)
-                direction INTEGER,       -- Direction bin (degrees: 0–359)
-                spreading FLOAT,           -- Normalized directional energy (unitless)
-
-                PRIMARY KEY (time_step_id, frequency, direction),
-                FOREIGN KEY (time_step_id) REFERENCES dirspec.time_steps (id)
-            );
-
-        """)
-
-        conn.commit()
+if __name__ == "__main__":
+    main()
