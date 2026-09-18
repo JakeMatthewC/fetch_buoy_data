@@ -77,8 +77,8 @@ def fetch_from_cdip(station_id: int, deployment: int) -> xr.Dataset | None:
         for start_month in date_ranges:
             start = datetime(year=start_month.year, month = start_month.month, day = 1)
 
-            era5_output_file = f"D:/Buoy_work/Raws Storage/ERA5 Raws/{station_id}/era5_{station_id}_{start:%Y%m}.nc"
-            era5_zip_output_file = f"D:/Buoy_work/Raws Storage/ERA5 Raws/{station_id}/zips/era5_{station_id}_{start:%Y%m}.zip"
+            era5_output_file = f"{c.era5_path}/{station_id}/era5_{station_id}_{start:%Y%m}.nc"
+            era5_zip_output_file = f"{c.era5_path}/{station_id}/zips/era5_{station_id}_{start:%Y%m}.zip"
             met_df_month = fetch_from_era5(station_id, start, lat, lon, era5_output_file, era5_zip_output_file)
             df_met_list.append(met_df_month)
 

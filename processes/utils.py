@@ -156,10 +156,9 @@ def get_enso_index(df_txt):
         "DJ": 12, "JF": 1, "FM": 2, "MA": 3, "AM": 4, "MJ": 5, 
         "JJ": 6, "JA": 7, "AS": 8, "SO": 9, "ON": 10, "ND": 11
     }
-    meiv2_path = r"D:\fetch_buoy_data\resources\meiv2.data"
     
     # load in mei data and melt
-    mei_df = pd.read_csv(meiv2_path, header=None, sep=r'\s+', names=mei_seasons)
+    mei_df = pd.read_csv(c.meiv2_path, header=None, sep=r'\s+', names=mei_seasons)
     mei_df = mei_df.reset_index()
     mei_df.rename(columns={'index': 'year'},inplace=True)
     mei_long = mei_df.melt(id_vars='year', var_name='month', value_name='MEI')

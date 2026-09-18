@@ -46,6 +46,15 @@ def mem(alpha1_deg, alpha2_deg, r1, r2, dirs_deg, eps=1e-8):
 
     Closed form, so it costs the same as the truncated series. Returns NaN for
     bins where 1 - |c1|^2 collapses (r1 -> 1); callers store those as NULL.
+
+    KNOWN LIMITATION -- MEM over-sharpens, and can split a genuinely unimodal sea
+    into two lobes while still reproducing its moments exactly. Measured on 29,940
+    energy-bearing NDBC bins: MEM renders 28.4% as a single lobe against 14.7% for
+    the truncated series, so it is substantially better overall, but it splits
+    14.4% of the bins the series shows as unimodal. Do not read lobe COUNT off a
+    MEM reconstruction and call it sea-state modality -- that is what
+    frequency_concentration() and sea_swell_separation() are for, and neither
+    depends on the shape of D.
     """
     a1, a2, r1, r2, th, dth = _prepare(alpha1_deg, alpha2_deg, r1, r2, dirs_deg)
 
@@ -55,8 +64,11 @@ def mem(alpha1_deg, alpha2_deg, r1, r2, dirs_deg, eps=1e-8):
 
     denom = 1.0 - np.abs(c1) ** 2
     denom = np.where(np.abs(denom) < eps, np.nan, denom)
-    phi1 = (c1 - c2 * np.conj(c1)) / denom
-    phi2 = c2 - c1 * phi1
+    # NaN here is the contract, not an anomaly: r1 -> 1 is genuinely degenerate
+    # and the caller stores NULL, so do not let numpy warn about it
+    with np.errstate(invalid="ignore", divide="ignore"):
+        phi1 = (c1 - c2 * np.conj(c1)) / denom
+        phi2 = c2 - c1 * phi1
 
     e1 = np.exp(-1j * th)[None, :]
     e2 = np.exp(-2j * th)[None, :]

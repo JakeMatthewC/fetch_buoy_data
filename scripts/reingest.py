@@ -31,10 +31,11 @@ import psycopg2
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 import config.db as db  # noqa: E402
+import config as c  # noqa: E402  (paths only -- no database, no pandas)
 
-NOAA_ROOT = r"D:\Buoy_work\Raws Storage\NOAA_Raws\year"
-CDIP_ROOT = r"D:\Buoy_work\Raws Storage\CDIP Raws"
-ERA5_ROOT = r"D:\Buoy_work\Raws Storage\ERA5 Raws"
+NOAA_ROOT = c.noaa_year_path
+CDIP_ROOT = c.cdip_path
+ERA5_ROOT = c.era5_path
 NOAA_EXTS = ("txt", "data_spec", "swdir", "swdir2", "swr1", "swr2")
 
 
