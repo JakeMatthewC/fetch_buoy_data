@@ -232,53 +232,6 @@ ALTER SEQUENCE dirspec.buoys_id_seq OWNED BY dirspec.buoys.id;
 
 
 --
--- Name: spectra_directional; Type: TABLE; Schema: dirspec; Owner: -
---
-
-CREATE TABLE dirspec.spectra_directional (
-    time_step_id integer NOT NULL,
-    frequency double precision NOT NULL,
-    direction integer NOT NULL,
-    spreading double precision
-);
-
-
---
--- Name: TABLE spectra_directional; Type: COMMENT; Schema: dirspec; Owner: -
---
-
-COMMENT ON TABLE dirspec.spectra_directional IS 'Directional spreading D(f, theta) expanded onto a fixed 5-degree grid. A CACHE: every row is reproducible exactly from spectra_parameters via D(theta) = (1/2pi)(1 + 2*r1*cos(theta-alpha1) + 2*r2*cos(2*(theta-alpha2))), clipped at zero and normalised. Populated only for timesteps inside the configured date window or matched to a storm. Has no foreign key, so deleting time_steps orphans these rows rather than cascading.';
-
-
---
--- Name: COLUMN spectra_directional.time_step_id; Type: COMMENT; Schema: dirspec; Owner: -
---
-
-COMMENT ON COLUMN dirspec.spectra_directional.time_step_id IS 'References dirspec.time_steps.id. NOTE: no FK constraint, and therefore no ON DELETE CASCADE.';
-
-
---
--- Name: COLUMN spectra_directional.frequency; Type: COMMENT; Schema: dirspec; Owner: -
---
-
-COMMENT ON COLUMN dirspec.spectra_directional.frequency IS 'Bin centre frequency, Hz. Joins to spectra_parameters.frequency.';
-
-
---
--- Name: COLUMN spectra_directional.direction; Type: COMMENT; Schema: dirspec; Owner: -
---
-
-COMMENT ON COLUMN dirspec.spectra_directional.direction IS 'Direction bin, degrees true, direction the waves are coming FROM (meteorological), 5-degree bins 0..355. Same convention as spectra_parameters.alpha1 and time_steps.mwd.';
-
-
---
--- Name: COLUMN spectra_directional.spreading; Type: COMMENT; Schema: dirspec; Owner: -
---
-
-COMMENT ON COLUMN dirspec.spectra_directional.spreading IS 'Normalised directional spreading D(theta), units of 1/radian. Integrates to 1 over direction: sum(spreading) * radians(5) = 1. Multiply by spectra_parameters.energy_density for the full 2-D spectrum S(f,theta) in m^2/Hz/rad.';
-
-
---
 -- Name: spectra_parameters; Type: TABLE; Schema: dirspec; Owner: -
 --
 
@@ -401,7 +354,9 @@ CREATE TABLE dirspec.time_steps (
     met_source text,
     tide_source text,
     tide_method text,
-    enso_mei double precision
+    enso_mei double precision,
+    dir_concentration_r double precision,
+    sea_swell_sep_deg double precision
 );
 
 
@@ -570,7 +525,7 @@ COMMENT ON COLUMN dirspec.time_steps.p IS 'Deep-water wave power per metre of cr
 -- Name: COLUMN time_steps.spectra_ingested; Type: COMMENT; Schema: dirspec; Owner: -
 --
 
-COMMENT ON COLUMN dirspec.time_steps.spectra_ingested IS 'TRUE when per-direction rows were written to spectra_directional for this timestep. Rows always get spectra_parameters regardless.';
+COMMENT ON COLUMN dirspec.time_steps.spectra_ingested IS 'TRUE once spectra_parameters rows have been written for this timestep. Previously meant "per-direction rows were written to spectra_directional", which no longer exists.';
 
 
 --
@@ -640,7 +595,7 @@ COMMENT ON COLUMN dirspec.time_steps.is_storm IS 'TRUE when a HURDAT2 track poin
 -- Name: COLUMN time_steps.modality_boot; Type: COMMENT; Schema: dirspec; Owner: -
 --
 
-COMMENT ON COLUMN dirspec.time_steps.modality_boot IS 'Rule-based modality label from the reconstructed directional spectrum: "unimodal", "bimodal" or "undetermined".';
+COMMENT ON COLUMN dirspec.time_steps.modality_boot IS 'Rule-based sea-state label derived from dir_concentration_r and sea_swell_sep_deg: "bimodal" when r < 0.85 AND sep > 45 deg, otherwise "unimodal"; "undetermined" when either metric is unavailable. Thresholds were fitted on NDBC 42055/2024 and validated against the anemometer - the selected 10.3% of timesteps have their swell band a median 104.8 deg off the measured wind, against 34.0 deg for the rest. Deliberately conservative. SUPERSEDES an earlier definition that counted directional peaks within each single frequency bin; that quantity was anti-correlated (r = -0.24) with genuine two-system seas, because two Fourier harmonics cannot resolve two modes inside one bin and it was reading the alpha2 mirror lobe as a second system. Prefer the two continuous columns over this label.';
 
 
 --
@@ -690,6 +645,20 @@ COMMENT ON COLUMN dirspec.time_steps.tide_method IS '"auto" = nearest-station lo
 --
 
 COMMENT ON COLUMN dirspec.time_steps.enso_mei IS 'Multivariate ENSO Index v2 for the bimonthly season containing this timestamp. Dimensionless standardised anomaly; positive = El Nino.';
+
+
+--
+-- Name: COLUMN time_steps.dir_concentration_r; Type: COMMENT; Schema: dirspec; Owner: -
+--
+
+COMMENT ON COLUMN dirspec.time_steps.dir_concentration_r IS 'Directional concentration across frequency, 0 to 1. Energy-weighted resultant length of the per-frequency mean directions: each alpha1(f) becomes a unit vector, weighted by E(f)*bandwidth, and this is the length of their sum. 1 = every frequency arrives from the same bearing; 0 = they cancel. A CONCENTRATION, NOT A SEPARATION: two systems 109 deg apart, two systems 118 deg apart split 35/65, and one broad unimodal sea all give ~0.58. The equivalent wrapped-normal spread is sqrt(-2*ln(r)) radians, but that saturates at r=0 and under-reads lopsided pairs, so r is what is stored.';
+
+
+--
+-- Name: COLUMN time_steps.sea_swell_sep_deg; Type: COMMENT; Schema: dirspec; Owner: -
+--
+
+COMMENT ON COLUMN dirspec.time_steps.sea_swell_sep_deg IS 'Angle in degrees, 0 to 180, between the energy-weighted mean wave directions below and at/above the spectral peak - i.e. how far apart the swell and the wind sea are pointing. Split at the peak of E(f)*df; that rule beat a fixed 0.125 Hz boundary, a wind-based wave-age split and a maximum-contrast search on 7,031 real timesteps, and needs no wind speed (which CDIP rows lack). HAS A FLOOR OF ABOUT 12 DEG from a single system turning with frequency, so a small value means one system, not two close together. Cannot say WHETHER two systems exist - that is dir_concentration_r.';
 
 
 --
@@ -1057,14 +1026,6 @@ ALTER TABLE ONLY dirspec.buoys
 
 
 --
--- Name: spectra_directional spectra_directional_pkey; Type: CONSTRAINT; Schema: dirspec; Owner: -
---
-
-ALTER TABLE ONLY dirspec.spectra_directional
-    ADD CONSTRAINT spectra_directional_pkey PRIMARY KEY (time_step_id, frequency, direction);
-
-
---
 -- Name: spectra_parameters spectra_parameters_pkey; Type: CONSTRAINT; Schema: dirspec; Owner: -
 --
 
@@ -1148,13 +1109,6 @@ CREATE INDEX idx_buoy_deployments_buoy_id ON dirspec.buoy_deployments USING btre
 --
 
 CREATE INDEX idx_buoy_deployments_time ON dirspec.buoy_deployments USING btree (start_time, end_time);
-
-
---
--- Name: idx_spectra_time; Type: INDEX; Schema: dirspec; Owner: -
---
-
-CREATE INDEX idx_spectra_time ON dirspec.spectra_directional USING btree (time_step_id);
 
 
 --

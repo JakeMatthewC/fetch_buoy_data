@@ -102,4 +102,93 @@ def directional_moments(D, dirs_deg):
             np.degrees(0.5 * np.arctan2(b2, a2)) % 360)
 
 
+def frequency_concentration(alpha1_deg, energy):
+    """Energy-weighted directional concentration of alpha1 ACROSS frequency.
+
+    Returns (R, mean_direction_deg).
+
+    R is the resultant length of the energy-weighted unit vectors, 0 to 1. It
+    answers "is this a single-direction wave environment?" -- 1 means every
+    frequency arrives from the same bearing, 0 means they cancel out.
+
+    R is NOT a separation: two systems 109 degrees apart, two systems 118 degrees
+    apart with a 35/65 energy split, and one broad unimodal sea all give R ~ 0.58.
+    Use sea_swell_separation() for the angle between systems.
+
+    The equivalent wrapped-normal spread is sigma = sqrt(-2 ln R) radians, but
+    that saturates (two opposed equal systems give R = 0, sigma = infinity) and
+    under-reads lopsided pairs, so R is the value worth storing.
+
+    energy: E(f) * bandwidth per bin, NOT energy density.
+    """
+    a = np.asarray(alpha1_deg, dtype=float)
+    e = np.asarray(energy, dtype=float)
+    good = np.isfinite(a) & np.isfinite(e) & (e > 0)
+    if good.sum() < 3 or e[good].sum() <= 0:
+        return np.nan, np.nan
+    w = e[good] / e[good].sum()
+    th = np.deg2rad(a[good])
+    C = float((w * np.cos(th)).sum())
+    S = float((w * np.sin(th)).sum())
+    return float(np.hypot(C, S)), float(np.degrees(np.arctan2(S, C)) % 360)
+
+
+def sea_swell_separation(alpha1_deg, energy, freqs):
+    """Angle between the mean directions either side of the spectral peak.
+
+    Splits at the peak of E(f)*df, takes the energy-weighted circular mean
+    direction of the bins below it and of the bins at or above it, and returns
+    the unsigned angle between them, 0 to 180 degrees.
+
+    Splitting at the peak beat the alternatives on 7,031 real timesteps. Against
+    directionally focused seas (R > 0.95, almost certainly one system) it reported
+    a median 12 degrees and never exceeded 60; a fixed 0.125 Hz boundary
+    false-positived 29.8% of the time, a wind-based wave-age split 18.2%, and
+    searching for the split that maximises contrast 59.5%. The peak also needs no
+    wind speed, which CDIP rows do not reliably have.
+
+    There is a floor of roughly 12 degrees from a single system turning with
+    frequency, so a small value does not mean "two systems close together" -- it
+    means one system. This cannot tell you WHETHER two systems exist; that is what
+    frequency_concentration() is for.
+    """
+    a = np.asarray(alpha1_deg, dtype=float)
+    e = np.asarray(energy, dtype=float)
+    f = np.asarray(freqs, dtype=float)
+    good = np.isfinite(a) & np.isfinite(e) & np.isfinite(f) & (e > 0)
+    if good.sum() < 6:
+        return np.nan
+    a, e, f = a[good], e[good], f[good]
+    f_peak = f[int(np.argmax(e))]
+    lo, hi = f < f_peak, f >= f_peak
+    if lo.sum() < 2 or hi.sum() < 2:
+        return np.nan
+    def _mean(mask):
+        w = e[mask] / e[mask].sum()
+        th = np.deg2rad(a[mask])
+        return np.degrees(np.arctan2((w * np.sin(th)).sum(),
+                                     (w * np.cos(th)).sum())) % 360
+    d_lo, d_hi = _mean(lo), _mean(hi)
+    return float(abs(((d_lo - d_hi + 180) % 360) - 180))
+
+
+# modality_boot thresholds. Chosen on 7,030 real timesteps from NDBC 42055/2024
+# and validated against the anemometer: this rule selects 10.3% of timesteps, and
+# their swell band sits a median 104.8 degrees off the measured wind against 34.0
+# degrees for the rest -- a 70.8 degree gap. Deliberately conservative: when it
+# says bimodal, there really are two systems. Both columns are stored, so any
+# other threshold can be applied later without recomputing.
+MODALITY_R_MAX = 0.85
+MODALITY_SEP_MIN_DEG = 45.0
+
+
+def modality_label(R, sep_deg):
+    """'bimodal', 'unimodal', or 'undetermined' from the two stored metrics."""
+    if R is None or sep_deg is None or not np.isfinite(R) or not np.isfinite(sep_deg):
+        return "undetermined"
+    if R < MODALITY_R_MAX and sep_deg > MODALITY_SEP_MIN_DEG:
+        return "bimodal"
+    return "unimodal"
+
+
 METHODS = {"mem": mem, "truncated_fourier": truncated_fourier}

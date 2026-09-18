@@ -250,18 +250,20 @@ def main():
     else:
         print("   no spectra_parameters row for this frequency")
 
-    cur.execute("""select direction, spreading from dirspec.spectra_directional
-                   where time_step_id = %s and abs(frequency - %s) < 1e-9
-                   order by direction""", (tsid, float(f)))
-    stored = cur.fetchall()
-    if stored and len(stored) == len(DIRS):
-        sv = np.array([s[1] for s in stored], dtype=float)
-        print(f"\n   spectra_directional: {len(stored)} bins stored")
-        print(f"     max |stored - reconstructed|   {np.abs(sv - D).max():.3e}"
-              "   (0 means the cache and the formula agree)")
-    else:
-        print("\n   spectra_directional: no rows for this timestep/frequency"
-              " (reconstructed on the fly by the viewer)")
+    cur.execute("""select dir_concentration_r, sea_swell_sep_deg, modality_boot
+                   from dirspec.time_steps where id = %s""", (tsid,))
+    got = cur.fetchone()
+    if got:
+        r_, sep_, lab = got
+        print("\n   whole-timestep sea-state metrics:")
+        if r_ is None:
+            print("     dir_concentration_r  NULL  (timestep not re-ingested yet)")
+        else:
+            print(f"     dir_concentration_r  {r_:.4f}   (1 = all frequencies from one bearing)")
+            print(f"     sea_swell_sep_deg    {sep_:.1f} deg  (angle across the spectral peak)")
+            print(f"     modality_boot        {lab}   (bimodal when r < 0.85 and sep > 45)")
+            print("     note: r is a CONCENTRATION, not a separation -- see the column comments")
+
     conn.close()
     return 0
 

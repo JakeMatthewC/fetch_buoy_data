@@ -12,7 +12,7 @@ from fetch_data.fetch_from_cdip import fetch_from_cdip
 
 
 def run(file_station_id, file_type, file_date, cdip_deployments,
-        start_date, end_date, save_is_storm, limit_timesteps=None):
+        limit_timesteps=None):
     """Ingest one or more buoy deployments.
 
     Body is unchanged from the original top-level script; it is wrapped in a
@@ -22,6 +22,10 @@ def run(file_station_id, file_type, file_date, cdip_deployments,
     limit_timesteps: keep only the earliest N timesteps of each deployment.
     Intended for smoke tests and for trialling a new station without committing
     to a full year. Leave as None for a normal ingest.
+
+    The old start_date/end_date/save_is_storm arguments are gone: they only ever
+    chose which timesteps were expanded into dirspec.spectra_directional, and
+    that table has been dropped in favour of reconstructing D on demand.
     """
     for station_id, f_date, f_type, cdip_deployment in zip(file_station_id, file_date, file_type, cdip_deployments):
         deployment_id = None
@@ -75,7 +79,7 @@ def run(file_station_id, file_type, file_date, cdip_deployments,
         print("Timesteps uploaded to database if no conflict.")
 
         # perform storm analysis at each timestep
-        df_txt, storm_dict = sbm.storm_buoy_match(cur, None, df_txt, 400, deployment_id)
+        df_txt, _storm_dict = sbm.storm_buoy_match(cur, None, df_txt, 400, deployment_id)
         print("Completed storm-buoy matches.")
 
         # filter the timesteps to only unprocessed ones
@@ -95,7 +99,7 @@ def run(file_station_id, file_type, file_date, cdip_deployments,
         df_swdir2 = df_swdir2[df_swdir2['datetime'].isin(dt_index)].reset_index(drop=True)
 
         # process for calculating D and determining modality
-        calc_D.calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_type, start_date, end_date, save_is_storm)
+        calc_D.calc_D(df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_type)
         print(f"Completed processing for buoy {station_id}.")
 
 
@@ -107,10 +111,4 @@ if __name__ == '__main__':
     file_date = ["2024"]
     cdip_deployments = [14]
 
-    # directional distributions to save to database
-    start_date = pd.to_datetime('2021-01-01').tz_localize("UTC")
-    end_date = pd.to_datetime('2021-12-31').tz_localize("UTC")
-    save_is_storm = True
-
-    run(file_station_id, file_type, file_date, cdip_deployments,
-        start_date, end_date, save_is_storm)
+    run(file_station_id, file_type, file_date, cdip_deployments)

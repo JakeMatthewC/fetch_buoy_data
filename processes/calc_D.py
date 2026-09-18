@@ -1,4 +1,8 @@
-def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_type, start_date, end_date, save_is_storm):
+def calc_D(df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_type):
+    # storm_dict / start_date / end_date / save_is_storm used to decide which
+    # timesteps got spectra_directional rows. That table is gone, so every
+    # timestep now gets the same treatment and those arguments were removed
+    # rather than left as no-ops.
     import sys
     import pandas as pd
     import psycopg2
@@ -7,7 +11,6 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
     # modules
     import processes.utils as u
     import config.config as c
-    import processes.detect_modality as dm
     import processes.directional as dirn
 
     # loops through each timestep where spec_ingested = False
@@ -65,14 +68,11 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
         D_normalized = dirn.mem(alpha1_deg, alpha2_deg, r1, r2, c.directional_pnts_deg)
         valid_row = np.isfinite(D_normalized).all(axis=1, keepdims=True)
 
-        S = D_normalized * E
-
         # get the timestep id from the timesteps table
         timestep_id = u.get_time_step_id(c.cur, str(station_id), datetime_obj)
 
         # organize for exporting to postgres table
         records_param = []
-        records_dir = []
         for m, f in enumerate(c.noaa_freqs):
             # already meteorological degrees - no conversion needed on the way out
             a_1 = float(alpha1_deg[m]) if np.isfinite(alpha1_deg[m]) else None
@@ -95,47 +95,28 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
         """
         psycopg2.extras.execute_values(c.cur, spectra_parameters_insert_query, records_param, page_size=100)
 
-        for m, f in enumerate(c.noaa_freqs):
-            if not valid_row[m, 0]:
-                # D(theta) is undefined for this bin - record nothing rather than NaN
-                continue
-            for n, theta in enumerate(c.directional_pnts_deg):
-                # theta is a METEOROLOGICAL direction bin, matching alpha1/alpha2
-                records_dir.append((int(timestep_id), float(f), int(theta),
-                                    float(D_normalized[m, n])))
+        # ---- per-timestep directional metrics -------------------------------
+        # spectra_directional is gone: D(theta) is reconstructed on demand from
+        # the parameters above, exactly (verified max|diff| = 0), so caching it
+        # only created a second copy that could drift out of step.
+        #
+        # Instead store two numbers that summarise the sea state and that a model
+        # can use directly. They answer different questions and neither replaces
+        # the other -- see processes/directional.py.
+        energy_per_bin = Ef * c.noaa_bandwidths            # E(f)*df, not density
+        conc_r, _mean_dir = dirn.frequency_concentration(alpha1_deg, energy_per_bin)
+        sep_deg = dirn.sea_swell_separation(alpha1_deg, energy_per_bin, c.noaa_freqs)
+        modality_res = dirn.modality_label(conc_r, sep_deg)
 
-        # determine modality and record for each timestep
-        modality_res = dm.detect_modality_from_dmatrix(S)
+        conc_out = float(conc_r) if np.isfinite(conc_r) else None
+        sep_out = float(sep_deg) if np.isfinite(sep_deg) else None
 
-        in_date_range = (start_date <= datetime_obj <= end_date)
-        is_storm_case = save_is_storm and timestep_id in storm_dict
-
-        if in_date_range or is_storm_case:
-            direction_insert_query = """
-                INSERT INTO dirspec.spectra_directional (
-                    time_step_id, frequency, direction, spreading
-                ) VALUES %s
-                ON CONFLICT (time_step_id, frequency, direction) DO NOTHING
-            """
-            if records_dir:
-                psycopg2.extras.execute_values(c.cur, direction_insert_query, records_dir, page_size=500)
-
-            c.conn.commit()
-
-            c.cur.execute("""
-                UPDATE dirspec.time_steps
-                SET modality_boot = %s,     
-                    spectra_ingested = TRUE
-                WHERE id = %s
-            """, (modality_res, timestep_id,))
-            c.conn.commit()
-
-        else:
-            c.cur.execute("""
-                UPDATE dirspec.time_steps
-                SET modality_boot = %s,     
-                    spectra_ingested = FALSE
-                WHERE id = %s
-            """, (modality_res, timestep_id,))
-            c.conn.commit()
-            
+        c.cur.execute("""
+            UPDATE dirspec.time_steps
+            SET dir_concentration_r = %s,
+                sea_swell_sep_deg   = %s,
+                modality_boot       = %s,
+                spectra_ingested    = TRUE
+            WHERE id = %s
+        """, (conc_out, sep_out, modality_res, timestep_id))
+        c.conn.commit()

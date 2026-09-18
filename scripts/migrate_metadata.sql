@@ -53,7 +53,7 @@ COMMENT ON COLUMN dirspec.buoy_deployments.depth IS 'Water depth at the deployme
 -- ------------------------------------------------------- dirspec.time_steps
 COMMENT ON TABLE dirspec.time_steps IS
   'One row per buoy observation time. Bulk wave/met parameters plus derived spectral moments, storm match metadata and climate indices. Unique on (buoy_id, timestamp).';
-COMMENT ON COLUMN dirspec.time_steps.id IS 'Surrogate key. Referenced by spectra_parameters, spectra_directional and storms.storm_matches.';
+COMMENT ON COLUMN dirspec.time_steps.id IS 'Surrogate key. Referenced by spectra_parameters and storms.storm_matches.';
 COMMENT ON COLUMN dirspec.time_steps.buoy_id IS 'FK to dirspec.buoys.id.';
 COMMENT ON COLUMN dirspec.time_steps."timestamp" IS 'Observation time, UTC.';
 
@@ -86,7 +86,7 @@ COMMENT ON COLUMN dirspec.time_steps.p IS 'Deep-water wave power per metre of cr
 
 COMMENT ON COLUMN dirspec.time_steps.enso_mei IS 'Multivariate ENSO Index v2 for the bimonthly season containing this timestamp. Dimensionless standardised anomaly; positive = El Nino.';
 
-COMMENT ON COLUMN dirspec.time_steps.spectra_ingested IS 'TRUE when per-direction rows were written to spectra_directional for this timestep. Rows always get spectra_parameters regardless.';
+COMMENT ON COLUMN dirspec.time_steps.spectra_ingested IS 'TRUE once spectra_parameters rows have been written for this timestep.';
 COMMENT ON COLUMN dirspec.time_steps.source IS 'Ingest path: "noaa-year" (NDBC historical), "noaa-rt" (NDBC realtime), or "cdip".';
 COMMENT ON COLUMN dirspec.time_steps.met_source IS 'Origin of the wind/pressure/temperature fields: "buoy" for NDBC, "ERA5" for CDIP stations.';
 
@@ -107,7 +107,7 @@ COMMENT ON COLUMN dirspec.time_steps.modality_ver IS 'Version tag of the modalit
 
 -- ----------------------------------------------- dirspec.spectra_parameters
 COMMENT ON TABLE dirspec.spectra_parameters IS
-  'Frequency-binned wave spectrum: energy density plus the first two directional Fourier pairs. This is the authoritative directional spectrum - D(theta) for any timestep, frequency and direction grid can be reconstructed from these columns alone, exactly reproducing dirspec.spectra_directional. 46 rows per timestep on the NDBC bin layout (CDIP data is resampled onto the same bins).';
+  'Frequency-binned wave spectrum: energy density plus the first two directional Fourier pairs. This is the authoritative directional spectrum - D(theta) for any timestep, frequency and direction grid can be reconstructed from these columns alone, with no second copy stored. 46 rows per timestep on the NDBC bin layout (CDIP data is resampled onto the same bins).';
 COMMENT ON COLUMN dirspec.spectra_parameters.time_step_id IS 'FK to dirspec.time_steps.id (ON DELETE CASCADE).';
 COMMENT ON COLUMN dirspec.spectra_parameters.frequency IS 'Bin centre frequency, Hz. 46 NDBC bins from 0.0325 to 0.4850 Hz.';
 COMMENT ON COLUMN dirspec.spectra_parameters.bandwidth IS
@@ -123,15 +123,9 @@ COMMENT ON COLUMN dirspec.spectra_parameters.r1 IS
 COMMENT ON COLUMN dirspec.spectra_parameters.r2 IS
   'Second-harmonic normalised Fourier coefficient, dimensionless, 0-1. Also divided by 100 on ingest for NDBC historical files.';
 
--- ---------------------------------------------- dirspec.spectra_directional
-COMMENT ON TABLE dirspec.spectra_directional IS
-  'Directional spreading D(f, theta) expanded onto a fixed 5-degree grid. A CACHE: every row is reproducible exactly from spectra_parameters via D(theta) = (1/2pi)(1 + 2*r1*cos(theta-alpha1) + 2*r2*cos(2*(theta-alpha2))), clipped at zero and normalised. Populated only for timesteps inside the configured date window or matched to a storm. Has no foreign key, so deleting time_steps orphans these rows rather than cascading.';
-COMMENT ON COLUMN dirspec.spectra_directional.time_step_id IS 'References dirspec.time_steps.id. NOTE: no FK constraint, and therefore no ON DELETE CASCADE.';
-COMMENT ON COLUMN dirspec.spectra_directional.frequency IS 'Bin centre frequency, Hz. Joins to spectra_parameters.frequency.';
-COMMENT ON COLUMN dirspec.spectra_directional.direction IS
-  'Direction bin, degrees true, direction the waves are coming FROM (meteorological), 5-degree bins 0..355. Same convention as spectra_parameters.alpha1 and time_steps.mwd.';
-COMMENT ON COLUMN dirspec.spectra_directional.spreading IS
-  'Normalised directional spreading D(theta), units of 1/radian. Integrates to 1 over direction: sum(spreading) * radians(5) = 1. Multiply by spectra_parameters.energy_density for the full 2-D spectrum S(f,theta) in m^2/Hz/rad.';
+-- dirspec.spectra_directional was dropped by migrate_drop_directional.sql;
+-- its COMMENT statements lived here and have been removed so this file
+-- still runs. D(theta) is reconstructed from spectra_parameters on demand.
 
 -- --------------------------------------------------------- storms.storms
 COMMENT ON TABLE  storms.storms IS 'One row per HURDAT2 tropical cyclone.';

@@ -109,12 +109,7 @@ def main():
                      ("host", "PGDIRSPEC_HOST"), ("port", "PGDIRSPEC_PORT")):
         os.environ[env] = str(source_params[key])
 
-    import pandas as pd
     import fetch_buoy_data as pipeline
-
-    # a window wide enough that every ingested timestep gets directional rows
-    start_date = pd.to_datetime(f"{args.year}-01-01").tz_localize("UTC")
-    end_date = pd.to_datetime(f"{args.year}-12-31").tz_localize("UTC")
 
     if args.type == "cdip" and args.deployment is None:
         sys.exit("--type cdip requires --deployment")
@@ -126,16 +121,12 @@ def main():
                  file_type=[args.type],
                  file_date=[args.year],
                  cdip_deployments=[args.deployment],
-                 start_date=start_date,
-                 end_date=end_date,
-                 save_is_storm=True,
                  limit_timesteps=args.limit)
     log(f"ingest finished in {time.time() - t0:.1f}s")
 
     with psycopg2.connect(**scratch_params, connect_timeout=10) as conn, conn.cursor() as cur:
         for t in ("dirspec.buoys", "dirspec.buoy_deployments", "dirspec.time_steps",
-                  "dirspec.spectra_parameters", "dirspec.spectra_directional",
-                  "storms.storm_matches"):
+                  "dirspec.spectra_parameters", "storms.storm_matches"):
             cur.execute(f"select count(*) from {t}")
             log(f"  {t:32s} {cur.fetchone()[0]:>10,}")
 
