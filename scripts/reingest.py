@@ -84,8 +84,15 @@ def era5_gaps(station, deployment):
         ds = xr.open_dataset(path)
         t = pd.to_datetime(ds["waveTime"].values, unit="s")
         ds.close()
+        # fetch_from_cdip asks for one month PAST the end of the deployment:
+        #     era5_end_time = timestamp.max().replace(day=1) + relativedelta(months=1)
+        # so the range has to match, or this reports "OK" for a deployment that
+        # will still hit the Copernicus API. That is exactly what happened to
+        # CDIP 144 d17: it ends 2024-08-27, every month through 202408 was cached,
+        # 202409 was not, and --skip-missing-era5 waved it through.
+        last = t.max().replace(day=1) + pd.offsets.MonthBegin(1)
         need, cur = set(), t.min().replace(day=1)
-        while cur <= t.max():
+        while cur <= last:
             need.add(cur.strftime("%Y%m"))
             cur = cur + pd.offsets.MonthBegin(1)
         have = {os.path.basename(x)[-9:-3]

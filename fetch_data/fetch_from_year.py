@@ -13,12 +13,12 @@ def fetch_from_year(station_id, date):
     # '999.0' already matches the real fill tokens 999, 999.0 and 999.00.
     NA_SPEC = ["MM", '999.0', '9999.0']
 
-    df_txt = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.txt", sep=r'\s+', skiprows=[1], na_values=["MM"])
-    df_data_spec = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.data_spec", sep=r'\s+', skiprows=[1], na_values=NA_SPEC)
-    df_swdir = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swdir", sep=r'\s+', skiprows=[1], na_values=NA_SPEC)
-    df_swdir2 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swdir2", sep=r'\s+', skiprows=[1], na_values=NA_SPEC)
-    df_swr1 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swr1", sep=r'\s+', skiprows=[1], na_values=NA_SPEC)
-    df_swr2 = pd.read_csv(f"{c.noaa_year_path}\\{station_id}\\{date}_year_{station_id}.swr2", sep=r'\s+', skiprows=[1], na_values=NA_SPEC)
+    df_txt = pd.read_csv(f"{c.noaa_year_path}/{station_id}/{date}_year_{station_id}.txt", sep=r'\s+', skiprows=[1], na_values=["MM"])
+    df_data_spec = pd.read_csv(f"{c.noaa_year_path}/{station_id}/{date}_year_{station_id}.data_spec", sep=r'\s+', skiprows=[1], na_values=NA_SPEC)
+    df_swdir = pd.read_csv(f"{c.noaa_year_path}/{station_id}/{date}_year_{station_id}.swdir", sep=r'\s+', skiprows=[1], na_values=NA_SPEC)
+    df_swdir2 = pd.read_csv(f"{c.noaa_year_path}/{station_id}/{date}_year_{station_id}.swdir2", sep=r'\s+', skiprows=[1], na_values=NA_SPEC)
+    df_swr1 = pd.read_csv(f"{c.noaa_year_path}/{station_id}/{date}_year_{station_id}.swr1", sep=r'\s+', skiprows=[1], na_values=NA_SPEC)
+    df_swr2 = pd.read_csv(f"{c.noaa_year_path}/{station_id}/{date}_year_{station_id}.swr2", sep=r'\s+', skiprows=[1], na_values=NA_SPEC)
 
     # stdmet fill values differ per column, so they cannot share one na_values list
     df_txt = u.mask_stdmet_sentinels(df_txt)
@@ -73,7 +73,12 @@ def fetch_from_year(station_id, date):
 
     meta_buoy = {
         'station_id': station_id,
-        'name': str(row['name']),
+        # .iloc[0] (positional), NOT [0] (label-based). get_noaa_station_row returns
+        # a .loc[] slice, so the DataFrame keeps its ORIGINAL index -- station 42001
+        # sits at label 139, and row['name'][0] raises KeyError. Plain str(row['name'])
+        # stringifies the whole Series, which is how "139  MID GULF ... Name: name,
+        # dtype: object" ended up in the database.
+        'name': str(row['name'].iloc[0]),
         'project': 'NOAA'
     }
 
@@ -92,8 +97,10 @@ def fetch_from_year(station_id, date):
         'deployment_id': deployment_id,
         'start_time': timestamps.min(),
         'end_time': timestamps.max(),
-        'latitude': row['lat'],
-        'longitude': row['lon'],
+        # same reason: these are one-element Series. float() on one still works but
+        # pandas warns and will raise in a future version
+        'latitude': float(row['lat'].iloc[0]),
+        'longitude': float(row['lon'].iloc[0]),
         'deployment_type': 'NOAA',
         'depth': None
     }
