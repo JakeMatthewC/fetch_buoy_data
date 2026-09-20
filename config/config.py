@@ -3,11 +3,8 @@
 Paths come from config.paths (environment-driven). The frequency grid is read
 from WPM_spectra.xlsx once at import.
 
-The `conn` and `cur` database handles are LAZY: they are created on first
-attribute access, not at import. Importing this module used to open a Postgres
-connection as a side effect, which meant no module that imported it -- which is
-most of the pipeline -- could be unit tested without a live database. Call sites
-are unchanged; `c.conn` and `c.cur` still work exactly as before.
+`conn` and `cur` are LAZY -- created on first attribute access, not at import,
+so the pipeline can be imported without a live database. Call sites are unchanged.
 """
 import numpy as np
 import pandas as pd
@@ -17,11 +14,9 @@ import config.db as db
 from config.paths import *          # noqa: F401,F403  (paths stay importable as c.<name>)
 from config.paths import wpm_path
 
-# --- frequency grid ----------------------------------------------------------
-# WPM_spectra.xlsx is the NDBC 47-bin layout: bin index, centre frequency (Hz),
-# bandwidth (Hz). skiprows=1 drops bin 1 at 0.0201 Hz, which the fetchers also
-# drop from the raw files, leaving 46 bins spanning 0.0325-0.4850 Hz. The bins
-# are contiguous and tile 0.030-0.495 Hz; bandwidths are 0.005, 0.01 or 0.02.
+# WPM_spectra.xlsx is the NDBC 47-bin layout: index, centre frequency, bandwidth.
+# skiprows=1 drops bin 1 at 0.0201 Hz, which the fetchers drop from the raw files
+# too, leaving 46 contiguous bins spanning 0.0325-0.4850 Hz.
 wpm_data = pd.read_excel(wpm_path, header=None, skiprows=1)
 noaa_freqs = np.array(pd.Series(wpm_data.iloc[:, 1]))
 noaa_bandwidths = np.array(pd.Series(wpm_data.iloc[:, 2]))
@@ -49,10 +44,9 @@ def _connect():
 
 
 def __getattr__(name):
-    """Create the connection on first use of c.conn or c.cur.
+    """Connect on first use of c.conn / c.cur.
 
-    Python calls this only for names not already defined in the module, so it
-    costs nothing for the paths and grid above.
+    Python calls this only for names not already defined in the module.
     """
     if name == "conn":
         return _connect()[0]

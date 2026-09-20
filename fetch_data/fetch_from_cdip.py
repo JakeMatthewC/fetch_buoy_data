@@ -130,32 +130,22 @@ def fetch_from_cdip(station_id: int, deployment: int) -> xr.Dataset | None:
         r1 = np.sqrt(a1_noaa_interp**2 + b1_noaa_interp**2)
         r2 = np.sqrt(a2_noaa_interp**2 + b2_noaa_interp**2)
 
-        # CDIP's a1/b1/a2/b2 are already referenced to compass "from" directions, so
-        # NO math->met rotation belongs here. Verified on station 134 d14:
-        # degrees(atan2(b1, a1)) matches ds['waveDp'] and ds['waveMeanDirection'] to
-        # 0.00 deg, whereas the previous (270 - x) form was off by 111.8 deg on
-        # average and mirrored the spectrum about the 135/315 axis.
-        #
-        # a2 = r2*cos(2*alpha2) and b2 = r2*sin(2*alpha2), so alpha2 is the HALF
-        # angle of atan2(b2, a2). Without the 0.5 the reconstructed D departs from
-        # the canonical a/b form by up to 0.35 (normalised density).
+        # CDIP's a1/b1/a2/b2 are already compass "from" directions, so NO math->met
+        # rotation belongs here -- degrees(atan2(b1,a1)) matches waveDp to 0.00 deg.
+        # alpha2 is the HALF angle, since a2 = r2*cos(2*alpha2).
         alpha1_met = np.degrees(np.arctan2(b1_noaa_interp, a1_noaa_interp)) % 360
         alpha2_met = np.degrees(0.5 * np.arctan2(b2_noaa_interp, a2_noaa_interp)) % 360
 
-        # interp1d pads bins outside CDIP's measured band with zeros, which would be
-        # stored as a genuine isotropic spectrum (r=0, alpha=0). Energy really is ~0
-        # out there so Ef_interp is left alone, but the directional terms are
-        # undefined -- mark them missing. No-op for a standard 0.025-0.58 Hz CDIP
-        # band, which fully covers all 46 NOAA bins.
+        # interp1d pads outside CDIP's band with zeros, which would look like a real
+        # isotropic spectrum. Energy really is ~0 there, but the directional terms
+        # are undefined, so mark them missing.
         out_of_band = (c.noaa_freqs < freq_cdip.min()) | (c.noaa_freqs > freq_cdip.max())
         if out_of_band.any():
             for arr in (r1, r2, alpha1_met, alpha2_met):
                 arr[:, out_of_band] = np.nan
 
-        # not using energy-weighted fourier currently, but commented out in case needed in future
-        # CAUTION if re-enabling: this block still contains the two bugs fixed above --
-        # it applies u.math_to_met_dir() to angles that are already compass 'from',
-        # and it omits the 0.5 half-angle factor on alpha2.
+        # energy-weighted fourier, unused. CAUTION if re-enabling: still contains
+        # both bugs fixed above -- a spurious math->met rotation, and no 0.5 on alpha2.
         '''
         # create energy-weighted values for interpolation
         E_cdip = Ef_cdip * bandwidth_cdip
