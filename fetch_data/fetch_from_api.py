@@ -25,7 +25,7 @@ def fetch_from_api(station_id, date):
     txt_path = f"{c.noaa_rt_path}\\{datetime.today().strftime('%Y-%m-%d')}_rt_{station_id}.txt"
     data_spec_path = f"{c.noaa_rt_path}\\{datetime.today().strftime('%Y-%m-%d')}_rt_{station_id}.data_spec"
     swdir_path = f"{c.noaa_rt_path}\\{datetime.today().strftime('%Y-%m-%d')}_rt_{station_id}.swdir"
-    swdir2_path = f"{c.noaa_rt_patht}\\{datetime.today().strftime('%Y-%m-%d')}_rt_{station_id}.swdir2"
+    swdir2_path = f"{c.noaa_rt_path}\\{datetime.today().strftime('%Y-%m-%d')}_rt_{station_id}.swdir2"
     swr1_path = f"{c.noaa_rt_path}\\{datetime.today().strftime('%Y-%m-%d')}_rt_{station_id}.swr1"
     swr2_path = f"{c.noaa_rt_path}\\{datetime.today().strftime('%Y-%m-%d')}_rt_{station_id}.swr2"
 

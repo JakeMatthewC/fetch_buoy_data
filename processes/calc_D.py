@@ -1,4 +1,4 @@
-def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_type, start_date, end_date, save_is_storm):
+def calc_D(df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, station_id, f_type):
     import sys
     import pandas as pd
     import psycopg2
@@ -7,7 +7,7 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
     # modules
     import processes.utils as u
     import config.config as c
-    import processes.detect_modality as dm
+    import processes.directional as dirn
 
     # loops through each timestep where spec_ingested = False
     for i,spec_row in df_data_spec.iterrows():
@@ -35,14 +35,10 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
         swr1_row = swr1_row.iloc[2:]
         swr2_row = swr2_row.iloc[2:]
 
-        # prepare for vectorized calculation
-        # alpha assumed as met in degrees
-        alpha1 = pd.to_numeric(swdir_row, errors='coerce')
-        alpha1 = np.where(~np.isnan(alpha1), u.met_to_math_dir(alpha1), np.nan)
-        alpha1 = alpha1.astype(float)
-        alpha2 = pd.to_numeric(swdir2_row, errors='coerce')
-        alpha2 = np.where(~np.isnan(alpha2), u.met_to_math_dir(alpha2), np.nan)
-        alpha2 = alpha2.astype(float)
+        # meteorological degrees (direction FROM), same convention as the direction
+        # grid, so nothing is rotated anywhere. See processes/directional.py.
+        alpha1_deg = pd.to_numeric(swdir_row, errors='coerce').to_numpy(dtype=float) % 360
+        alpha2_deg = pd.to_numeric(swdir2_row, errors='coerce').to_numpy(dtype=float) % 360
 
         r1 = pd.to_numeric(swr1_row,errors='coerce')
         r1 = np.array(r1)
@@ -52,85 +48,51 @@ def calc_D(storm_dict, df_data_spec, df_swdir, df_swdir2, df_swr1, df_swr2, stat
         Ef = pd.to_numeric(spec_row, errors='coerce')
         Ef = np.array(Ef)
 
-        alpha1_grid = alpha1[:,None]
-        alpha2_grid = alpha2[:, None]
         E = Ef[:, None]
 
-        D = (1 / (2 * np.pi)) * (
-            (1 + 2 * r1[:, None] * np.cos(c.theta_grid - alpha1_grid))
-            + (2 * r2[:, None] * np.cos(2 * (c.theta_grid - alpha2_grid))
-            ))
-        
-        # remove negatives from D output
-        D = np.maximum(D, 0)
-        
-        row_sums = np.sum(D, axis=1, keepdims=True) * c.delta_theta_rad
-        row_sums[row_sums == 0] = 1
-        # normalize
-        D_normalized = D / row_sums
-
-        S = D_normalized * E
+        # NaN rows where inputs are missing or MEM is degenerate (r1 -> 1)
+        D_normalized = dirn.mem(alpha1_deg, alpha2_deg, r1, r2, c.directional_pnts_deg)
+        valid_row = np.isfinite(D_normalized).all(axis=1, keepdims=True)
 
         # get the timestep id from the timesteps table
         timestep_id = u.get_time_step_id(c.cur, str(station_id), datetime_obj)
 
         # organize for exporting to postgres table
         records_param = []
-        records_dir = []
         for m, f in enumerate(c.noaa_freqs):
-            a_1 = float(u.math_to_met_dir(alpha1[m])) if not np.isnan(alpha1[m]) else None
-            a_2 = float(u.math_to_met_dir(alpha2[m])) if not np.isnan(alpha2[m]) else None
-            r_1 = float(r1[m]) if not np.isnan(r1[m]) else None
-            r_2 = float(r2[m]) if not np.isnan(r2[m]) else None
-            energy_density = float(E[m, 0])
-            records_param.append((int(timestep_id), float(f), a_1, a_2, r_1, r_2, float(energy_density)))
+            a_1 = float(alpha1_deg[m]) if np.isfinite(alpha1_deg[m]) else None
+            a_2 = float(alpha2_deg[m]) if np.isfinite(alpha2_deg[m]) else None
+            r_1 = float(r1[m]) if np.isfinite(r1[m]) else None
+            r_2 = float(r2[m]) if np.isfinite(r2[m]) else None
+            energy_density = float(E[m, 0]) if np.isfinite(E[m, 0]) else None
+            # stored so the spectrum can be integrated from the database alone
+            bandwidth = float(c.noaa_bandwidths[m])
+            records_param.append((int(timestep_id), float(f), bandwidth, a_1, a_2, r_1, r_2, energy_density))
 
         # write the spectral data to the spec table
         spectra_parameters_insert_query = """
-            INSERT INTO dirspec.spectra_parameters (time_step_id, frequency, alpha1, alpha2, r1, r2, energy_density)
+            INSERT INTO dirspec.spectra_parameters (time_step_id, frequency, bandwidth, alpha1, alpha2, r1, r2, energy_density)
             VALUES %s
             ON CONFLICT (time_step_id, frequency) DO NOTHING
         """
         psycopg2.extras.execute_values(c.cur, spectra_parameters_insert_query, records_param, page_size=100)
 
-        for m, f in enumerate(c.noaa_freqs):
-            for n, theta in enumerate(c.directional_pnts_deg):
-                spreading = float(D_normalized[m, n])
-                records_dir.append((timestep_id, f, theta, spreading))
+        # per-timestep sea-state metrics. They answer different questions and
+        # neither replaces the other -- see processes/directional.py.
+        energy_per_bin = Ef * c.noaa_bandwidths            # E(f)*df, not density
+        conc_r, _mean_dir = dirn.frequency_concentration(alpha1_deg, energy_per_bin)
+        sep_deg = dirn.sea_swell_separation(alpha1_deg, energy_per_bin, c.noaa_freqs)
+        modality_res = dirn.modality_label(conc_r, sep_deg)
 
-        records_dir = [(int(timestep_id), float(f), int(theta), float(spreading)) for (timestep_id, f, theta, spreading) in records_dir]
+        conc_out = float(conc_r) if np.isfinite(conc_r) else None
+        sep_out = float(sep_deg) if np.isfinite(sep_deg) else None
 
-        # determine modality and record for each timestep
-        modality_res = dm.detect_modality_from_dmatrix(S)
-
-        in_date_range = (start_date <= datetime_obj <= end_date)
-        is_storm_case = save_is_storm and timestep_id in storm_dict
-
-        if in_date_range or is_storm_case:
-            direction_insert_query = """
-                INSERT INTO dirspec.spectra_directional (
-                    time_step_id, frequency, direction, spreading
-                ) VALUES %s
-                ON CONFLICT (time_step_id, frequency, direction) DO NOTHING
-            """
-            psycopg2.extras.execute_values(c.cur, direction_insert_query, records_dir, page_size=500)
-
-            c.conn.commit()
-
-            c.cur.execute("""
-                UPDATE dirspec.time_steps
-                SET modality_boot = %s,     
-                    spectra_ingested = TRUE
-                WHERE id = %s
-            """, (modality_res, timestep_id,))
-            c.conn.commit()
-
-        else:
-            c.cur.execute("""
-                UPDATE dirspec.time_steps
-                SET modality_boot = %s,     
-                    spectra_ingested = FALSE
-                WHERE id = %s
-            """, (modality_res, timestep_id,))
-            c.conn.commit()
-            
+        c.cur.execute("""
+            UPDATE dirspec.time_steps
+            SET dir_concentration_r = %s,
+                sea_swell_sep_deg   = %s,
+                modality_boot       = %s,
+                spectra_ingested    = TRUE
+            WHERE id = %s
+        """, (conc_out, sep_out, modality_res, timestep_id))
+        c.conn.commit()

@@ -77,8 +77,8 @@ def fetch_from_cdip(station_id: int, deployment: int) -> xr.Dataset | None:
         for start_month in date_ranges:
             start = datetime(year=start_month.year, month = start_month.month, day = 1)
 
-            era5_output_file = f"D:/Buoy_work/Raws Storage/ERA5 Raws/{station_id}/era5_{station_id}_{start:%Y%m}.nc"
-            era5_zip_output_file = f"D:/Buoy_work/Raws Storage/ERA5 Raws/{station_id}/zips/era5_{station_id}_{start:%Y%m}.zip"
+            era5_output_file = f"{c.era5_path}/{station_id}/era5_{station_id}_{start:%Y%m}.nc"
+            era5_zip_output_file = f"{c.era5_path}/{station_id}/zips/era5_{station_id}_{start:%Y%m}.zip"
             met_df_month = fetch_from_era5(station_id, start, lat, lon, era5_output_file, era5_zip_output_file)
             df_met_list.append(met_df_month)
 
@@ -130,14 +130,22 @@ def fetch_from_cdip(station_id: int, deployment: int) -> xr.Dataset | None:
         r1 = np.sqrt(a1_noaa_interp**2 + b1_noaa_interp**2)
         r2 = np.sqrt(a2_noaa_interp**2 + b2_noaa_interp**2)
 
-        alpha1_rad = np.arctan2(b1_noaa_interp, a1_noaa_interp)
-        alpha2_rad = np.arctan2(b2_noaa_interp, a2_noaa_interp)
+        # CDIP's a1/b1/a2/b2 are already compass "from" directions, so NO math->met
+        # rotation belongs here -- degrees(atan2(b1,a1)) matches waveDp to 0.00 deg.
+        # alpha2 is the HALF angle, since a2 = r2*cos(2*alpha2).
+        alpha1_met = np.degrees(np.arctan2(b1_noaa_interp, a1_noaa_interp)) % 360
+        alpha2_met = np.degrees(0.5 * np.arctan2(b2_noaa_interp, a2_noaa_interp)) % 360
 
-        # convert to meteorological & degrees
-        alpha1_met = (270 - np.degrees(alpha1_rad)) % 360
-        alpha2_met = (270 - np.degrees(alpha2_rad)) % 360
+        # interp1d pads outside CDIP's band with zeros, which would look like a real
+        # isotropic spectrum. Energy really is ~0 there, but the directional terms
+        # are undefined, so mark them missing.
+        out_of_band = (c.noaa_freqs < freq_cdip.min()) | (c.noaa_freqs > freq_cdip.max())
+        if out_of_band.any():
+            for arr in (r1, r2, alpha1_met, alpha2_met):
+                arr[:, out_of_band] = np.nan
 
-        # not using enery-weighted fourier currently, but commented out in case needed in future
+        # energy-weighted fourier, unused. CAUTION if re-enabling: still contains
+        # both bugs fixed above -- a spurious math->met rotation, and no 0.5 on alpha2.
         '''
         # create energy-weighted values for interpolation
         E_cdip = Ef_cdip * bandwidth_cdip
